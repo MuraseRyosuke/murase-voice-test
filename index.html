@@ -311,8 +311,7 @@
 
     for (let s = 0; s < seqLen; s++) {
       for (let d = 0; d < minDim; d++) {
-        // 元: [s, d] (インデックス: s * srcDim + d)
-        // 転置先: [d, s] (インデックス: d * seqLen + s)
+        // 元: [s, d] -> 転置先: [d, s]
         targetData[d * seqLen + s] = rawFeatures[s * srcDim + d];
       }
     }
@@ -381,9 +380,8 @@
       const bertResults = await bertSession.run(bertFeeds);
       const rawBertData = bertResults.last_hidden_state.data; // Float32Array [1, seqLen, 768]
 
-      // 転置・形状変換: [1, 1024, seqLen] と [1, 768, seqLen]
+      // 転置・形状変換: すべてのBERT入力を要求通りの [1, 1024, seqLen] に成型
       const bert1024 = transformBertFeatures(rawBertData, seqLen, 768, 1024);
-      const bert768 = transformBertFeatures(rawBertData, seqLen, 768, 768);
 
       statusText.textContent = '音声を生成中...';
 
@@ -403,9 +401,8 @@
           vitsFeeds[name] = new ort.Tensor('int64', dummyTones, [1, seqLen]);
         } else if (name === 'language' || name === 'lang_ids') {
           vitsFeeds[name] = new ort.Tensor('int64', new BigInt64Array(seqLen).fill(0n), [1, seqLen]);
-        } else if (name === 'ja_bert') {
-          vitsFeeds[name] = bert768;
-        } else if (name === 'bert' || name === 'en_bert' || name === 'zh_bert') {
+        } else if (name.includes('bert')) {
+          // ja_bert, bert, en_bert, zh_bert をすべて 1024 次元で設定
           vitsFeeds[name] = bert1024;
         } else if (name === 'style_vec') {
           vitsFeeds[name] = new ort.Tensor('float32', new Float32Array(256), [1, 1, 256]);
