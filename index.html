@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Style-BERT-VITS2 Web Player</title>
+  <title>Style-BERT-VITS2 Web Player (Exact Demo)</title>
   <style>
     :root {
       --primary: #4f46e5;
@@ -17,7 +17,7 @@
 
     body {
       margin: 0;
-      padding: 20px 16px;
+      padding: 24px 16px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background-color: var(--bg);
       color: var(--text);
@@ -51,7 +51,6 @@
 
     .banner {
       background-color: #fffbeb;
-      border: 1px solid #fef3c7;
       border-left: 4px solid var(--accent);
       padding: 12px;
       border-radius: 8px;
@@ -60,25 +59,14 @@
       margin-bottom: 16px;
     }
 
-    .banner strong {
-      color: #b45309;
-    }
-
-    textarea {
-      width: 100%;
-      height: 90px;
-      box-sizing: border-box;
+    .sample-box {
+      background: #f1f5f9;
       padding: 12px;
       border-radius: 8px;
-      border: 1px solid var(--border);
       font-size: 0.95rem;
-      resize: vertical;
+      color: #334155;
       margin-bottom: 16px;
-    }
-
-    textarea:focus {
-      outline: none;
-      border-color: var(--primary);
+      border: 1px solid var(--border);
     }
 
     .btn {
@@ -91,11 +79,6 @@
       border: none;
       border-radius: 8px;
       cursor: pointer;
-      transition: background 0.2s;
-    }
-
-    .btn:hover:not(:disabled) {
-      background-color: var(--primary-hover);
     }
 
     .btn:disabled {
@@ -136,9 +119,7 @@
       gap: 12px;
     }
 
-    audio {
-      width: 100%;
-    }
+    audio { width: 100%; }
 
     .download-link {
       display: block;
@@ -153,24 +134,25 @@
       background: #eef2ff;
     }
   </style>
-
-  <!-- ONNX Runtime Web CDN -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 </head>
 <body>
 
 <div class="container">
   <h1>村瀬亮介 音声プレイヤー (Web Test)</h1>
-  <p class="sub">Style-BERT-VITS2 INT8 ブラウザ推論</p>
+  <p class="sub">Style-BERT-VITS2 INT8 ブラウザ推論デモ</p>
 
-  <div id="agreement-box" class="banner">
+  <div class="banner">
     <strong>⚠️ データ通信量のご注意</strong><br>
-    ブラウザ上で直接音声を生成するため、初回実行時に量子化モデルデータ（分割バイナリ 計約150MB）を並列ダウンロードします。<strong>Wi-Fi環境でのご利用を推奨します。</strong>
+    ブラウザ上で直接音声を生成するため、初回実行時に量子化モデルデータ（分割バイナリ 計約50MB）をダウンロードします。Wi-Fi環境でのご利用を推奨します。
   </div>
 
-  <textarea id="inputText" placeholder="ひらがな・カタカナを入力してください（例：こんにちは、テストちゅうです）">こんにちは、むらせりょうすけです。おんせいのテストです。</textarea>
+  <div style="font-size:0.85rem; color:#64748b; margin-bottom:6px;">再生対象テキスト:</div>
+  <div class="sample-box">
+    「こんにちは。村瀬亮介の音声テストプレイヤーへようこそ。ブラウザ上で動作しています。」
+  </div>
 
-  <button id="actionBtn" class="btn">モデルを読み込んで音声を生成</button>
+  <button id="actionBtn" class="btn">モデルをロードして音声を生成</button>
 
   <div id="progress" class="progress-bar">
     <div id="progress-fill" class="progress-fill"></div>
@@ -180,32 +162,18 @@
 
   <div id="audio-area" class="audio-player-area">
     <audio id="audioPlayer" controls></audio>
-    <a id="downloadBtn" class="download-link" href="#" download="voice.wav">📥 音声ファイル (.wav) を保存</a>
+    <a id="downloadBtn" class="download-link" href="#" download="murase_voice.wav">📥 音声ファイル (.wav) を保存</a>
   </div>
 </div>
 
 <script>
   let vitsSession = null;
-  let bertSession = null;
-  let bertVocab = {};
 
-  // --- 分割モデル・辞書のパス設定 ---
   const VITS_CHUNKS = [
     './models/model_part0.bin',
     './models/model_part1.bin',
     './models/model_part2.bin'
   ];
-
-  const BERT_CHUNKS = [
-    './models/bert_part0.bin',
-    './models/bert_part1.bin',
-    './models/bert_part2.bin',
-    './models/bert_part3.bin',
-    './models/bert_part4.bin',
-    './models/bert_part5.bin'
-  ];
-
-  const VOCAB_URL = './models/vocab.txt';
 
   const btn = document.getElementById('actionBtn');
   const statusText = document.getElementById('status-text');
@@ -214,85 +182,7 @@
   const audioArea = document.getElementById('audio-area');
   const audioPlayer = document.getElementById('audioPlayer');
   const downloadBtn = document.getElementById('downloadBtn');
-  const agreementBox = document.getElementById('agreement-box');
 
-  // --- Style-BERT-VITS2 標準音素テーブル ---
-  const SYMBOLS = [
-    "_", ",", ".", "!", "?", "-", "A", "I", "U", "E", "O", "N",
-    "a", "b", "by", "ch", "d", "dy", "e", "f", "g", "gy", "h", "hy",
-    "i", "j", "k", "ky", "m", "my", "n", "ny", "o", "p", "py", "r",
-    "ry", "s", "sh", "t", "ts", "ty", "u", "v", "w", "y", "z", "cl"
-  ];
-  const symbolToId = {};
-  SYMBOLS.forEach((s, idx) => { symbolToId[s] = idx; });
-
-  // ひらがな・カタカナ -> 音素列マッピング
-  const KANA_MAP = {
-    'あ': ['a'], 'い': ['i'], 'う': ['u'], 'お': ['o'],
-    'か': ['k', 'a'], 'き': ['k', 'i'], 'く': ['k', 'u'], 'け': ['k', 'e'], 'こ': ['k', 'o'],
-    'さ': ['s', 'a'], 'し': ['sh', 'i'], 'す': ['s', 'u'], 'せ': ['s', 'e'], 'そ': ['s', 'o'],
-    'た': ['t', 'a'], 'ち': ['ch', 'i'], 'つ': ['ts', 'u'], 'て': ['t', 'e'], 'と': ['t', 'o'],
-    'な': ['n', 'a'], 'に': ['n', 'i'], 'ぬ': ['n', 'u'], 'ね': ['n', 'e'], 'の': ['n', 'o'],
-    'は': ['h', 'a'], 'ひ': ['h', 'i'], 'ふ': ['f', 'u'], 'へ': ['h', 'e'], 'ほ': ['h', 'o'],
-    'ま': ['m', 'a'], 'み': ['m', 'i'], 'む': ['m', 'u'], 'め': ['m', 'e'], 'も': ['m', 'o'],
-    'や': ['y', 'a'], 'ゆ': ['y', 'u'], 'よ': ['y', 'o'],
-    'ら': ['r', 'a'], 'り': ['r', 'i'], 'る': ['r', 'u'], 'れ': ['r', 'e'], 'ろ': ['r', 'o'],
-    'わ': ['w', 'a'], 'を': ['o'], 'ん': ['N'],
-    'が': ['g', 'a'], 'ぎ': ['g', 'i'], 'ぐ': ['g', 'u'], 'げ': ['g', 'e'], 'ご': ['g', 'o'],
-    'ざ': ['z', 'a'], 'じ': ['j', 'i'], 'ず': ['z', 'u'], 'ぜ': ['z', 'e'], 'ぞ': ['z', 'o'],
-    'だ': ['d', 'a'], 'ぢ': ['j', 'i'], 'づ': ['z', 'u'], 'で': ['d', 'e'], 'ど': ['d', 'o'],
-    'ば': ['b', 'a'], 'び': ['b', 'i'], 'ぶ': ['b', 'u'], 'べ': ['b', 'e'], 'ぼ': ['b', 'o'],
-    'ぱ': ['p', 'a'], 'ぴ': ['p', 'i'], 'ぷ': ['p', 'u'], 'ぺ': ['p', 'e'], 'ぽ': ['p', 'o'],
-    'きゃ': ['ky', 'a'], 'きゅ': ['ky', 'u'], 'きょ': ['ky', 'o'],
-    'しゃ': ['sh', 'a'], 'しゅ': ['sh', 'u'], 'しょ': ['sh', 'o'],
-    'ちゃ': ['ch', 'a'], 'ちゅ': ['ch', 'u'], 'ちょ': ['ch', 'o'],
-    'にゃ': ['ny', 'a'], 'にゅ': ['ny', 'u'], 'にょ': ['ny', 'o'],
-    'ひゃ': ['hy', 'a'], 'ひゅ': ['hy', 'u'], 'ひょ': ['hy', 'o'],
-    'みゃ': ['my', 'a'], 'みゅ': ['my', 'u'], 'みょ': ['my', 'o'],
-    'りゃ': ['ry', 'a'], 'りゅ': ['ry', 'u'], 'りょ': ['ry', 'o'],
-    'ぎゃ': ['gy', 'a'], 'ぎゅ': ['gy', 'u'], 'ぎょ': ['gy', 'o'],
-    'じゃ': ['j', 'a'], 'じゅ': ['j', 'u'], 'じょ': ['j', 'o'],
-    'びゃ': ['by', 'a'], 'びゅ': ['by', 'u'], 'びょ': ['by', 'o'],
-    'ぴゃ': ['py', 'a'], 'ぴゅ': ['py', 'u'], 'ぴょ': ['py', 'o'],
-    'っ': ['cl'], 'ー': ['-'], '、': [','], '。': ['.'], '！': ['!'], '？': ['?'], ' ': ['_']
-  };
-
-  // テキストを音素ID列に変換
-  function textToPhonemes(text) {
-    // カタカナをひらがなに統一
-    const hira = text.replace(/[\u30a1-\u30f6]/g, (m) => String.fromCharCode(m.charCodeAt(0) - 0x60));
-    const phonemes = ['_']; // 先頭ポーズ
-
-    let i = 0;
-    while (i < hira.length) {
-      // 2文字（拗音: きゃ, しゅ等）を優先判定
-      const two = hira.substr(i, 2);
-      if (KANA_MAP[two]) {
-        phonemes.push(...KANA_MAP[two]);
-        i += 2;
-        continue;
-      }
-      const one = hira.substr(i, 1);
-      if (KANA_MAP[one]) {
-        phonemes.push(...KANA_MAP[one]);
-      } else if (one === ',' || one === '、') {
-        phonemes.push(',');
-      } else if (one === '.' || one === '。') {
-        phonemes.push('.');
-      } else if (one === '!' || one === '！') {
-        phonemes.push('!');
-      } else if (one === '?' || one === '？') {
-        phonemes.push('?');
-      }
-      i++;
-    }
-    phonemes.push('_'); // 末尾ポーズ
-
-    const phoneIds = phonemes.map(p => (symbolToId[p] !== undefined ? symbolToId[p] : 0));
-    return BigInt64Array.from(phoneIds.map(BigInt));
-  }
-
-  // 分割バイナリを並列ダウンロードして結合
   async function fetchAndCombineChunks(chunkUrls) {
     const buffers = await Promise.all(
       chunkUrls.map(async (url) => {
@@ -312,87 +202,25 @@
     return combinedArray.buffer;
   }
 
-  // エンジンとモデルの並列初期化
-  async function initializeEngine() {
+  async function loadModel() {
     progress.style.display = 'block';
-    progressFill.style.width = '15%';
-    statusText.textContent = '辞書データを取得中...';
+    progressFill.style.width = '30%';
+    statusText.textContent = '音声モデルデータを並列ダウンロード中...';
 
     ort.env.wasm.numThreads = navigator.hardwareConcurrency ? Math.min(4, navigator.hardwareConcurrency) : 2;
 
-    // 1. BERT辞書 (vocab.txt) のロード
-    const vocabRes = await fetch(VOCAB_URL);
-    if (!vocabRes.ok) throw new Error('vocab.txt の読み込みに失敗しました');
-    const vocabText = await vocabRes.text();
-    vocabText.split('\n').forEach((token, idx) => {
-      const t = token.trim();
-      if (t) bertVocab[t] = idx;
-    });
-
-    // 2. 日本語BERTモデルの取得 & ロード
-    progressFill.style.width = '40%';
-    statusText.textContent = '日本語BERTモデルを並列ダウンロード中...';
-    const bertBuffer = await fetchAndCombineChunks(BERT_CHUNKS);
-
-    progressFill.style.width = '60%';
-    statusText.textContent = 'BERTセッションを作成中...';
-    bertSession = await ort.InferenceSession.create(bertBuffer, {
-      executionProviders: ['wasm']
-    });
-
-    // 3. VITS 音声生成モデルの取得 & ロード
-    progressFill.style.width = '80%';
-    statusText.textContent = '音声合成モデルを並列ダウンロード中...';
     const vitsBuffer = await fetchAndCombineChunks(VITS_CHUNKS);
 
-    progressFill.style.width = '95%';
-    statusText.textContent = '音声モデルセッションを作成中...';
+    progressFill.style.width = '80%';
+    statusText.textContent = 'モデルセッションを初期化中...';
+
     vitsSession = await ort.InferenceSession.create(vitsBuffer, {
       executionProviders: ['wasm']
     });
 
     progressFill.style.width = '100%';
-    statusText.textContent = 'モデルの準備が完了しました！';
-    agreementBox.style.display = 'none';
   }
 
-  // トークナイズ処理
-  function tokenizeText(text) {
-    const tokens = ['[CLS]'];
-    for (const char of text) {
-      if (char in bertVocab) {
-        tokens.push(char);
-      } else {
-        tokens.push('[UNK]');
-      }
-    }
-    tokens.push('[SEP]');
-
-    const unkId = bertVocab['[UNK]'] ?? 1;
-    const inputIds = tokens.map(t => bertVocab[t] ?? unkId);
-
-    return {
-      inputIds: BigInt64Array.from(inputIds.map(BigInt)),
-      length: tokens.length
-    };
-  }
-
-  // BERT出力を音素長に合わせてリサイズ・転置: [1, 1024, phoneSeqLen]
-  function transformBertFeatures(rawFeatures, bertLen, phoneLen, srcDim = 768, targetDim = 1024) {
-    const targetData = new Float32Array(targetDim * phoneLen);
-    const minDim = Math.min(srcDim, targetDim);
-
-    for (let p = 0; p < phoneLen; p++) {
-      // BERTトークン位置との簡易アライメント対応
-      const bIdx = Math.min(Math.floor((p / phoneLen) * bertLen), bertLen - 1);
-      for (let d = 0; d < minDim; d++) {
-        targetData[d * phoneLen + p] = rawFeatures[bIdx * srcDim + d];
-      }
-    }
-    return new ort.Tensor('float32', targetData, [1, targetDim, phoneLen]);
-  }
-
-  // Float32Array波形からWAV Blobを生成
   function createWavBlob(samples, sampleRate = 44100) {
     const buffer = new ArrayBuffer(44 + samples.length * 2);
     const view = new DataView(buffer);
@@ -408,8 +236,8 @@
     writeString(8, 'WAVE');
     writeString(12, 'fmt ');
     view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true); // PCM
-    view.setUint16(22, 1, true); // Mono
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
     view.setUint32(24, sampleRate, true);
     view.setUint32(28, sampleRate * 2, true);
     view.setUint16(32, 2, true);
@@ -426,92 +254,62 @@
     return new Blob([view], { type: 'audio/wav' });
   }
 
-  // 音声合成の実行
   btn.addEventListener('click', async () => {
-    const text = document.getElementById('inputText').value.trim();
-    if (!text) return;
-
     btn.disabled = true;
 
     try {
-      if (!vitsSession || !bertSession) {
-        await initializeEngine();
+      if (!vitsSession) {
+        await loadModel();
       }
 
-      statusText.textContent = '日本語を音素と文脈特徴量に変換中...';
+      statusText.textContent = '特徴量データを読み込み、音声を合成中...';
 
-      // 1. テキストから正確な音素列を生成
-      const phones = textToPhonemes(text);
-      const phoneSeqLen = phones.length;
+      // 正確なテンソルJSONをフェッチ
+      const inputRes = await fetch('./exact_input.json');
+      if (!inputRes.ok) throw new Error('exact_input.json が見つかりません');
+      const inputData = await inputRes.json();
 
-      // 2. BERT 推論 (文脈特徴量の抽出)
-      const tokenized = tokenizeText(text);
-      const bertLen = tokenized.length;
-
-      const bertFeeds = {
-        input_ids: new ort.Tensor('int64', tokenized.inputIds, [1, bertLen]),
-        attention_mask: new ort.Tensor('int64', new BigInt64Array(bertLen).fill(1n), [1, bertLen]),
-        token_type_ids: new ort.Tensor('int64', new BigInt64Array(bertLen).fill(0n), [1, bertLen])
-      };
-
-      const bertResults = await bertSession.run(bertFeeds);
-      const rawBertData = bertResults.last_hidden_state.data;
-
-      // 音素長に合わせた 1024次元 BERT テンソル
-      const bert1024 = transformBertFeatures(rawBertData, bertLen, phoneSeqLen, 768, 1024);
-
-      statusText.textContent = '音声を生成中...';
-
-      // 3. VITS 入力テンソルの構築
-      const tones = new BigInt64Array(phoneSeqLen).fill(0n);
-
-      const vitsFeeds = {};
+      const feeds = {};
       for (const name of vitsSession.inputNames) {
-        if (name === 'x_tst') {
-          vitsFeeds[name] = new ort.Tensor('int64', phones, [1, phoneSeqLen]);
-        } else if (name === 'x_tst_lengths') {
-          vitsFeeds[name] = new ort.Tensor('int64', BigInt64Array.from([BigInt(phoneSeqLen)]), [1]);
-        } else if (name === 'speakers' || name === 'sid') {
-          vitsFeeds[name] = new ort.Tensor('int64', BigInt64Array.from([0n]), [1]);
-        } else if (name === 'tones') {
-          vitsFeeds[name] = new ort.Tensor('int64', tones, [1, phoneSeqLen]);
-        } else if (name === 'language' || name === 'lang_ids') {
-          vitsFeeds[name] = new ort.Tensor('int64', new BigInt64Array(phoneSeqLen).fill(0n), [1, phoneSeqLen]);
-        } else if (name.includes('bert')) {
-          vitsFeeds[name] = bert1024;
-        } else if (name === 'style_vec') {
-          vitsFeeds[name] = new ort.Tensor('float32', new Float32Array(256), [1, 1, 256]);
-        } else if (name === 'noise_scale') {
-          vitsFeeds[name] = new ort.Tensor('float32', Float32Array.from([0.667]), [1]);
-        } else if (name === 'length_scale') {
-          vitsFeeds[name] = new ort.Tensor('float32', Float32Array.from([1.0]), [1]);
-        } else if (name === 'noise_scale_w') {
-          vitsFeeds[name] = new ort.Tensor('float32', Float32Array.from([0.8]), [1]);
-        } else if (name === 'sdp_ratio') {
-          vitsFeeds[name] = new ort.Tensor('float32', Float32Array.from([0.2]), [1]);
+        if (!(name in inputData)) {
+          feeds[name] = new ort.Tensor('float32', Float32Array.from([0.0]), [1]);
+          continue;
+        }
+
+        const item = inputData[name];
+        if (item.dtype === 'int64') {
+          feeds[name] = new ort.Tensor(
+            'int64',
+            BigInt64Array.from(item.data.map(BigInt)),
+            item.shape
+          );
         } else {
-          vitsFeeds[name] = new ort.Tensor('float32', Float32Array.from([0.0]), [1]);
+          feeds[name] = new ort.Tensor(
+            'float32',
+            new Float32Array(item.data),
+            item.shape
+          );
         }
       }
 
-      // 4. VITS Generator 推論
-      const vitsResults = await vitsSession.run(vitsFeeds);
+      // ONNX 推論
+      const results = await vitsSession.run(feeds);
       const outputKey = vitsSession.outputNames[0];
-      const audioData = vitsResults[outputKey].data;
+      const audioData = results[outputKey].data;
 
-      // 5. WAV 生成 & 再生
+      // WAV 作成 & 再生
       const sampleRate = 44100;
       const wavBlob = createWavBlob(audioData, sampleRate);
       const audioUrl = URL.createObjectURL(wavBlob);
 
       audioPlayer.src = audioUrl;
       downloadBtn.href = audioUrl;
-      downloadBtn.download = `voice_${Date.now()}.wav`;
+      downloadBtn.download = `murase_voice_${Date.now()}.wav`;
 
       audioArea.style.display = 'flex';
       audioPlayer.play();
-      statusText.textContent = '音声合成完了！';
-      btn.textContent = '音声を生成する';
+      statusText.textContent = '合成完了！';
+      btn.textContent = 'もう一度音声を生成';
     } catch (err) {
       console.error(err);
       statusText.textContent = 'エラーが発生しました。コンソール(F12)をご確認ください。';
