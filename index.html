@@ -293,44 +293,66 @@
         await loadModel();
       }
 
-      statusText.textContent = '音声を生成中...';
+      statusText.textContent = '音声特徴量を読み込み、推論中...';
 
-      // ==========================================
-      // Style-BERT-VITS2 の推論処理
-      // ==========================================
-      // 実際の推論テンソル入力例（モデルの入力名に合わせて渡します）
-      /*
-      const feeds = {
-        phones: new ort.Tensor('int64', phonesArray, [1, phonesArray.length]),
-        tones: new ort.Tensor('int64', tonesArray, [1, tonesArray.length]),
-        bert: new ort.Tensor('float32', bertArray, [1, 1024, phonesArray.length]),
-        style: new ort.Tensor('float32', styleVector, [1, 256]),
-      };
-      const results = await session.run(feeds);
-      const audioData = results.audio.data;
-      */
+      // 1. テスト用の入力テンソル(JSON)を取得
+      const inputRes = await fetch('./test_input.json');
+      const inputData = await inputRes.json();
 
-      // 動作検証用のモック波形（サンプリングレート44.1kHzで1.5秒）
-      const sampleRate = 44100;
-      const dummySamples = new Float32Array(sampleRate * 1.5);
-      for (let i = 0; i < dummySamples.length; i++) {
-        // 440Hz（ラ）のサイン波テスト音
-        dummySamples[i] = Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 0.2;
+      const seqLen = inputData.phones.length;
+
+      // 2. ONNX Runtime 用のテンソルを作成
+      const feeds = {};
+
+      // モデルの入力名に合わせてセット（一般的なStyle-BERT-VITS2 ONNXの構成）
+      if (session.inputNames.includes('phones')) {
+        feeds['phones'] = new ort.Tensor('int64', BigInt64Array.from(inputData.phones.map(BigInt)), [1, seqLen]);
+      }
+      if (session.inputNames.includes('tones')) {
+        feeds['tones'] = new ort.Tensor('int64', BigInt64Array.from(inputData.tones.map(BigInt)), [1, seqLen]);
+      }
+      if (session.inputNames.includes('lang_ids')) {
+        feeds['lang_ids'] = new ort.Tensor('int64', BigInt64Array.from(inputData.lang_ids.map(BigInt)), [1, seqLen]);
+      }
+      if (session.inputNames.includes('bert')) {
+        feeds['bert'] = new ort.Tensor('float32', new Float32Array(inputData.bert.flat(2)), [1, 1024, seqLen]);
+      }
+      if (session.inputNames.includes('ja_bert')) {
+        feeds['ja_bert'] = new ort.Tensor('float32', new Float32Array(inputData.ja_bert.flat(2)), [1, 768, seqLen]);
+      }
+      if (session.inputNames.includes('style')) {
+        feeds['style'] = new ort.Tensor('float32', new Float32Array(inputData.style.flat()), [1, 256]);
+      }
+      if (session.inputNames.includes('noise_scale')) {
+        feeds['noise_scale'] = new ort.Tensor('float32', Float32Array.from([0.667]), [1]);
+      }
+      if (session.inputNames.includes('length_scale')) {
+        feeds['length_scale'] = new ort.Tensor('float32', Float32Array.from([1.0]), [1]);
       }
 
-      const wavBlob = createWavBlob(dummySamples, sampleRate);
+      // 3. ONNXモデルで推論実行
+      const results = await session.run(feeds);
+
+      // 出力された音声波形 (Float32Array)
+      const outputKey = session.outputNames[0];
+      const audioData = results[outputKey].data;
+
+      // 4. WAV Blob を生成してプレイヤーにセット (サンプリングレート44.1kHz)
+      const sampleRate = 44100;
+      const wavBlob = createWavBlob(audioData, sampleRate);
       const audioUrl = URL.createObjectURL(wavBlob);
 
       audioPlayer.src = audioUrl;
       downloadBtn.href = audioUrl;
-      downloadBtn.download = `voice_${Date.now()}.wav`;
+      downloadBtn.download = `murase_voice_${Date.now()}.wav`;
 
       audioArea.style.display = 'flex';
-      statusText.textContent = '生成完了！';
+      audioPlayer.play();
+      statusText.textContent = '音声生成完了！';
       btn.textContent = '音声を生成する';
     } catch (e) {
       console.error(e);
-      statusText.textContent = 'エラーが発生しました。コンソールログを確認してください。';
+      statusText.textContent = '推論エラー: コンソール(F12)をご確認ください。';
     } finally {
       btn.disabled = false;
       progress.style.display = 'none';
