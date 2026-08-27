@@ -295,57 +295,50 @@
 
       statusText.textContent = '特徴量をロードして推論中...';
 
-      // 1. JSONから入力データを取得
+      // 1. 形状定義付きの入力JSONを取得
       const inputRes = await fetch('./test_input.json');
       const inputData = await inputRes.json();
 
-      const seqLen = inputData.x_tst ? inputData.x_tst.length : 10;
       const feeds = {};
 
-      // 2. モデルの入力定義に合わせてテンソルを構築
+      // 2. JSONの形状(shape)と型(dtype)に従ってテンソルを自動生成
       for (const inputName of session.inputNames) {
         if (!(inputName in inputData)) {
-          console.warn(`警告: ${inputName} のデータがJSONに含まれていません`);
+          console.warn(`未定義の入力: ${inputName}`);
           continue;
         }
 
-        const val = inputData[inputName];
-
-        if (inputName === 'x_tst') {
-          feeds[inputName] = new ort.Tensor('int64', BigInt64Array.from(val.map(BigInt)), [1, seqLen]);
-        } else if (inputName === 'x_tst_lengths') {
-          feeds[inputName] = new ort.Tensor('int64', BigInt64Array.from(val.map(BigInt)), [1]);
-        } else if (inputName === 'speakers' || inputName === 'sid') {
-          feeds[inputName] = new ort.Tensor('int64', BigInt64Array.from(val.map(BigInt)), [1]);
-        } else if (inputName === 'tones' || inputName === 'language' || inputName === 'lang_ids') {
-          feeds[inputName] = new ort.Tensor('int64', BigInt64Array.from(val.map(BigInt)), [1, seqLen]);
-        } else if (inputName.includes('bert')) {
-          const flatBert = new Float32Array(val.flat(2));
-          const dim = val[0].length;
-          feeds[inputName] = new ort.Tensor('float32', flatBert, [1, dim, seqLen]);
-        } else if (inputName.includes('style')) {
-          feeds[inputName] = new ort.Tensor('float32', new Float32Array(val.flat()), [1, 256]);
+        const item = inputData[inputName];
+        if (item.dtype === 'int64') {
+          feeds[inputName] = new ort.Tensor(
+            'int64',
+            BigInt64Array.from(item.data.map(BigInt)),
+            item.shape
+          );
         } else {
-          // noise_scale, length_scale, noise_scale_w, sdp_ratio などのスカラー値
-          feeds[inputName] = new ort.Tensor('float32', Float32Array.from(val), [1]);
+          feeds[inputName] = new ort.Tensor(
+            'float32',
+            new Float32Array(item.data),
+            item.shape
+          );
         }
       }
 
-      // 3. 推論実行
+      // 3. ONNX 推論実行
       const results = await session.run(feeds);
 
       // 4. 出力波形の取得
       const outputKey = session.outputNames[0];
       const audioData = results[outputKey].data;
 
-      // 5. WAV Blob 生成 (Style-BERT-VITS2 は通常 44.1kHz)
+      // 5. WAV Blob 生成 (Style-BERT-VITS2 は 44.1kHz)
       const sampleRate = 44100;
       const wavBlob = createWavBlob(audioData, sampleRate);
       const audioUrl = URL.createObjectURL(wavBlob);
 
       audioPlayer.src = audioUrl;
       downloadBtn.href = audioUrl;
-      downloadBtn.download = `voice_${Date.now()}.wav`;
+      downloadBtn.download = `murase_voice_${Date.now()}.wav`;
 
       audioArea.style.display = 'flex';
       audioPlayer.play();
