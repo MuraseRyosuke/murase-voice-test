@@ -1,346 +1,321 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Style-BERT-VITS2 Web Player (Exact Demo)</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Style-BERT-VITS2 Web Player</title>
+  <!-- 最新の ONNX Runtime Web (WebGPU & WASM 対応) -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.all.min.js"></script>
   <style>
     :root {
-      --primary: #4f46e5;
-      --primary-hover: #4338ca;
-      --bg: #f8fafc;
-      --card-bg: #ffffff;
-      --text: #1e293b;
-      --border: #e2e8f0;
-      --accent: #f59e0b;
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f8fafc;
+      --subtext: #94a3b8;
+      --accent: #38bdf8;
+      --accent-hover: #0284c7;
+      --success: #34d399;
+      --border: #334155;
     }
-
     body {
       margin: 0;
-      padding: 24px 16px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background-color: var(--bg);
+      padding: 2rem 1rem;
+      background: var(--bg);
       color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       display: flex;
       justify-content: center;
     }
-
     .container {
       width: 100%;
-      max-width: 520px;
-      background: var(--card-bg);
-      padding: 24px;
-      border-radius: 16px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+      max-width: 640px;
+      background: var(--card);
       border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 2rem;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
     }
-
     h1 {
-      font-size: 1.25rem;
-      margin-top: 0;
-      margin-bottom: 6px;
-      text-align: center;
+      font-size: 1.5rem;
+      margin: 0 0 0.5rem;
+      font-weight: 700;
     }
-
-    p.sub {
-      font-size: 0.85rem;
-      color: #64748b;
-      text-align: center;
-      margin-bottom: 20px;
+    p {
+      color: var(--subtext);
+      margin: 0 0 1.5rem;
+      font-size: 0.9rem;
     }
-
-    .banner {
-      background-color: #fffbeb;
-      border-left: 4px solid var(--accent);
-      padding: 12px;
-      border-radius: 8px;
-      font-size: 0.85rem;
-      line-height: 1.5;
-      margin-bottom: 16px;
-    }
-
-    .sample-box {
-      background: #f1f5f9;
-      padding: 12px;
-      border-radius: 8px;
-      font-size: 0.95rem;
-      color: #334155;
-      margin-bottom: 16px;
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.8rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 9999px;
+      background: #0f172a;
       border: 1px solid var(--border);
-      line-height: 1.5;
+      margin-bottom: 1.5rem;
     }
-
-    .btn {
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--subtext);
+    }
+    .dot.active { background: var(--success); }
+    .controls {
+      display: grid;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      background: #0f172a80;
+      padding: 1rem;
+      border-radius: 0.5rem;
+      border: 1px solid var(--border);
+    }
+    .control-group {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+    }
+    input[type="range"] {
+      width: 160px;
+      accent-color: var(--accent);
+    }
+    button {
       width: 100%;
-      padding: 12px;
-      font-size: 1rem;
-      font-weight: 600;
-      color: white;
-      background-color: var(--primary);
+      padding: 0.875rem;
+      background: var(--accent);
+      color: #0f172a;
+      font-weight: 700;
       border: none;
-      border-radius: 8px;
+      border-radius: 0.5rem;
       cursor: pointer;
-      transition: background 0.2s;
+      font-size: 1rem;
+      transition: all 0.2s;
     }
-
-    .btn:hover:not(:disabled) {
-      background-color: var(--primary-hover);
+    button:hover:not(:disabled) {
+      background: var(--accent-hover);
+      color: #fff;
     }
-
-    .btn:disabled {
+    button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
-
-    .progress-bar {
-      width: 100%;
-      height: 6px;
-      background: #e2e8f0;
-      border-radius: 3px;
-      overflow: hidden;
-      margin: 16px 0;
-      display: none;
-    }
-
-    .progress-fill {
-      width: 0%;
-      height: 100%;
-      background: var(--primary);
-      transition: width 0.2s;
-    }
-
-    #status-text {
-      font-size: 0.85rem;
-      color: #64748b;
-      text-align: center;
-      margin-top: 8px;
-    }
-
-    .audio-player-area {
-      margin-top: 20px;
-      padding-top: 16px;
-      border-top: 1px solid var(--border);
-      display: none;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    audio { width: 100%; }
-
-    .download-link {
-      display: block;
-      text-align: center;
-      text-decoration: none;
-      color: var(--primary);
-      font-weight: 600;
-      font-size: 0.9rem;
-      padding: 8px;
-      border: 1px dashed var(--primary);
-      border-radius: 6px;
-      background: #eef2ff;
+    .log-box {
+      margin-top: 1.5rem;
+      background: #090d16;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.75rem;
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: var(--subtext);
+      max-height: 140px;
+      overflow-y: auto;
+      white-space: pre-wrap;
     }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 </head>
 <body>
 
 <div class="container">
-  <h1>村瀬亮介 音声プレイヤー (Web Test)</h1>
-  <p class="sub">Style-BERT-VITS2 INT8 ブラウザ推論デモ</p>
+  <h1>Style-BERT-VITS2 音声プレイヤー</h1>
+  <p>ブラウザ上で WebGPU / WASM 高速推論を行います。</p>
 
-  <div class="banner">
-    <strong>⚠️ データ通信量のご注意</strong><br>
-    ブラウザ上で直接音声を生成するため、初回実行時に量子化モデルデータ（約50MB）をダウンロードします。Wi-Fi環境でのご利用を推奨します。
+  <div class="status-badge">
+    <span class="dot" id="statusDot"></span>
+    <span id="backendStatus">バックエンド: 初期化待機中</span>
   </div>
 
-  <div style="font-size:0.85rem; color:#64748b; margin-bottom:6px;">再生対象テキスト:</div>
-  <div class="sample-box">
-    「こんにちは。村瀬亮介の音声テストプレイヤーへようこそ。ブラウザ上で動作しています。」
+  <div class="controls">
+    <div class="control-group">
+      <label for="noiseScale">Noise Scale (ざらつき抑制): <span id="noiseVal">0.35</span></label>
+      <input type="range" id="noiseScale" min="0.1" max="1.0" step="0.05" value="0.35" />
+    </div>
+    <div class="control-group">
+      <label for="noiseScaleW">Noise Scale W (音素長安定化): <span id="noiseWVal">0.60</span></label>
+      <input type="range" id="noiseScaleW" min="0.1" max="1.0" step="0.05" value="0.60" />
+    </div>
+    <div class="control-group">
+      <label for="sdpRatio">SDP Ratio (決定論的生成): <span id="sdpVal">0.00</span></label>
+      <input type="range" id="sdpRatio" min="0.0" max="1.0" step="0.05" value="0.00" />
+    </div>
   </div>
 
-  <button id="actionBtn" class="btn">モデルをロードして音声を生成</button>
+  <button id="playBtn">モデルをロードして音声を合成・再生</button>
 
-  <div id="progress" class="progress-bar">
-    <div id="progress-fill" class="progress-fill"></div>
-  </div>
-
-  <div id="status-text"></div>
-
-  <div id="audio-area" class="audio-player-area">
-    <audio id="audioPlayer" controls></audio>
-    <a id="downloadBtn" class="download-link" href="#" download="murase_voice.wav">📥 音声ファイル (.wav) を保存</a>
-  </div>
+  <div class="log-box" id="logs">ログがここに表示されます...</div>
 </div>
 
 <script>
-  let vitsSession = null;
+  // --- 1. 最適化バックエンドの設定 ---
+  ort.env.wasm.numThreads = Math.min(navigator.hardwareConcurrency || 4, 8);
+  ort.env.wasm.simd = true;
 
-  const VITS_CHUNKS = [
-    './models/model_part0.bin',
-    './models/model_part1.bin',
-    './models/model_part2.bin'
-  ];
+  let session = null;
+  let audioCtx = null;
 
-  const btn = document.getElementById('actionBtn');
-  const statusText = document.getElementById('status-text');
-  const progress = document.getElementById('progress');
-  const progressFill = document.getElementById('progress-fill');
-  const audioArea = document.getElementById('audio-area');
-  const audioPlayer = document.getElementById('audioPlayer');
-  const downloadBtn = document.getElementById('downloadBtn');
+  const logBox = document.getElementById("logs");
+  const playBtn = document.getElementById("playBtn");
+  const statusDot = document.getElementById("statusDot");
+  const backendStatus = document.getElementById("backendStatus");
 
-  // 分割バイナリを並列取得して結合
-  async function fetchAndCombineChunks(chunkUrls) {
-    const buffers = await Promise.all(
-      chunkUrls.map(async (url) => {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`ダウンロード失敗: ${url}`);
-        return await res.arrayBuffer();
-      })
-    );
-
-    const totalLength = buffers.reduce((sum, buf) => sum + buf.byteLength, 0);
-    const combinedArray = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const buf of buffers) {
-      combinedArray.set(new Uint8Array(buf), offset);
-      offset += buf.byteLength;
-    }
-    return combinedArray.buffer;
+  function log(msg) {
+    console.log(msg);
+    logBox.textContent += `\n[${new Date().toLocaleTimeString()}] ${msg}`;
+    logBox.scrollTop = logBox.scrollHeight;
   }
 
-  // モデルの初期化
+  // スライダー表示連動
+  document.getElementById("noiseScale").oninput = (e) => document.getElementById("noiseVal").textContent = parseFloat(e.target.value).toFixed(2);
+  document.getElementById("noiseScaleW").oninput = (e) => document.getElementById("noiseWVal").textContent = parseFloat(e.target.value).toFixed(2);
+  document.getElementById("sdpRatio").oninput = (e) => document.getElementById("sdpVal").textContent = parseFloat(e.target.value).toFixed(2);
+
+  // --- 2. モデルのロード処理 ---
   async function loadModel() {
-    progress.style.display = 'block';
-    progressFill.style.width = '30%';
-    statusText.textContent = '音声モデルデータを並列ダウンロード中...';
-
-    ort.env.wasm.numThreads = navigator.hardwareConcurrency ? Math.min(4, navigator.hardwareConcurrency) : 2;
-
-    const vitsBuffer = await fetchAndCombineChunks(VITS_CHUNKS);
-
-    progressFill.style.width = '80%';
-    statusText.textContent = 'モデルセッションを初期化中...';
-
-    vitsSession = await ort.InferenceSession.create(vitsBuffer, {
-      executionProviders: ['wasm']
-    });
-
-    progressFill.style.width = '100%';
-  }
-
-  // WAV Blob 生成 (44.1kHz)
-  function createWavBlob(samples, sampleRate = 44100) {
-    const buffer = new ArrayBuffer(44 + samples.length * 2);
-    const view = new DataView(buffer);
-
-    function writeString(offset, string) {
-      for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
-      }
-    }
-
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + samples.length * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, samples.length * 2, true);
-
-    let offset = 44;
-    for (let i = 0; i < samples.length; i++, offset += 2) {
-      const s = Math.max(-1, Math.min(1, samples[i]));
-      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-    }
-
-    return new Blob([view], { type: 'audio/wav' });
-  }
-
-  // int64型を要求する既知の入力名一覧
-  const INT64_INPUTS = new Set([
-    'x_tst', 'x_tst_lengths', 'speakers', 'sid', 'tones', 'language', 'lang_ids'
-  ]);
-
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
+    log("モデルファイル探索中 (model.onnx)...");
+    
+    // WebGPU を最優先、非対応環境では自動でマルチスレッド WASM にフォールバック
+    const options = {
+      executionProviders: ['webgpu', 'wasm'],
+      graphOptimizationLevel: 'all'
+    };
 
     try {
-      if (!vitsSession) {
+      session = await ort.InferenceSession.create('./model.onnx', options);
+    } catch (e) {
+      log("単一ファイルが見つからないため、分割チャンク結合を試行します...");
+      // 分割ファイル (model.onnx.part_00 等) がある場合のフォールバック結合
+      session = await loadChunkedModel(options);
+    }
+
+    statusDot.classList.add("active");
+    // 使用されたバックエンドの判定表示
+    const currentProvider = navigator.gpu ? "WebGPU (GPU並列アクセラレーション)" : "WASM (CPU マルチスレッド SIMD)";
+    backendStatus.textContent = `バックエンド: ${currentProvider}`;
+    log(`モデルロード完了 [実行環境: ${currentProvider}]`);
+  }
+
+  async function loadChunkedModel(options) {
+    const chunks = [];
+    let idx = 0;
+    while (true) {
+      const partName = `./model.onnx.part_${String(idx).padStart(2, '0')}`;
+      try {
+        const res = await fetch(partName);
+        if (!res.ok) break;
+        const buf = await res.arrayBuffer();
+        chunks.push(new Uint8Array(buf));
+        log(`チャンク読み込み: part_${String(idx).padStart(2, '0')} (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+        idx++;
+      } catch (err) {
+        break;
+      }
+    }
+    if (chunks.length === 0) throw new Error("ONNXモデルファイルが見つかりません。");
+
+    const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
+    const merged = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return await ort.InferenceSession.create(merged.buffer, options);
+  }
+
+  // --- 3. 音声合成と再生 ---
+  async function synthesizeAndPlay() {
+    playBtn.disabled = true;
+    const startTime = performance.now();
+
+    try {
+      if (!session) {
+        log("初回モデルロードを開始します...");
         await loadModel();
       }
 
-      statusText.textContent = '特徴量データを読み込み、音声を合成中...';
+      log("入力データ (exact_input.json) を読み込み中...");
+      const res = await fetch("./exact_input.json?t=" + Date.now());
+      if (!res.ok) throw new Error("exact_input.json の取得に失敗しました。");
+      const payload = await res.json();
 
-      // exact_input.json の取得
-      const inputRes = await fetch('./exact_input.json');
-      if (!inputRes.ok) throw new Error('exact_input.json が見つかりません');
-      const inputData = await inputRes.json();
+      // UI の低ノイズパラメータをテンソルに上書き適用
+      const userNoiseScale = parseFloat(document.getElementById("noiseScale").value);
+      const userNoiseScaleW = parseFloat(document.getElementById("noiseScaleW").value);
+      const userSdpRatio = parseFloat(document.getElementById("sdpRatio").value);
 
+      if (payload.noise_scale) payload.noise_scale.data = [userNoiseScale];
+      if (payload.noise_scale_w) payload.noise_scale_w.data = [userNoiseScaleW];
+      if (payload.sdp_ratio) payload.sdp_ratio.data = [userSdpRatio];
+
+      log(`パラメータ適用: noise_scale=${userNoiseScale}, sdp_ratio=${userSdpRatio}`);
+
+      // ONNX 入力テンソルの作成
       const feeds = {};
-      const phoneSeqLen = inputData.x_tst ? inputData.x_tst.shape[1] : 82;
+      const aliasMap = { x_tst: "x", x_tst_lengths: "x_lengths", speakers: "sid", tones: "tone" };
 
-      for (const name of vitsSession.inputNames) {
-        if (name in inputData) {
-          const item = inputData[name];
-          if (item.dtype === 'int64' || INT64_INPUTS.has(name)) {
-            feeds[name] = new ort.Tensor(
-              'int64',
-              BigInt64Array.from(item.data.map(BigInt)),
-              item.shape
-            );
-          } else {
-            feeds[name] = new ort.Tensor(
-              'float32',
-              new Float32Array(item.data),
-              item.shape
-            );
+      for (const inputName of session.inputNames) {
+        let sourceKey = inputName;
+        if (!payload[sourceKey]) {
+          // エイリアス解決
+          sourceKey = Object.keys(aliasMap).find(k => aliasMap[k] === inputName || k === inputName) || inputName;
+        }
+
+        const item = payload[sourceKey] || payload[aliasMap[sourceKey]];
+        if (item) {
+          let shape = [...item.shape];
+          // ランク（次元数）の整合性補正 (style_vec 等)
+          if (inputName.includes("style") && shape.length === 2) {
+            shape = [1, 1, 256];
           }
-        } else {
-          // 未定義入力の型別フォールバック
-          if (INT64_INPUTS.has(name)) {
-            const isSeq = (name === 'tones' || name === 'language' || name === 'lang_ids');
-            const shape = isSeq ? [1, phoneSeqLen] : [1];
-            const data = new BigInt64Array(isSeq ? phoneSeqLen : 1).fill(0n);
-            feeds[name] = new ort.Tensor('int64', data, shape);
+
+          if (item.dtype === "int64") {
+            const bigArr = new BigInt64Array(item.data.map(v => BigInt(v)));
+            feeds[inputName] = new ort.Tensor("int64", bigArr, shape);
           } else {
-            feeds[name] = new ort.Tensor('float32', Float32Array.from([0.0]), [1]);
+            const f32Arr = new Float32Array(item.data);
+            feeds[inputName] = new ort.Tensor("float32", f32Arr, shape);
           }
         }
       }
 
-      // ONNX 推論実行
-      const results = await vitsSession.run(feeds);
-      const outputKey = vitsSession.outputNames[0];
-      const audioData = results[outputKey].data;
+      log("ONNX 推論実行中...");
+      const inferStart = performance.now();
+      const results = await session.run(feeds);
+      const inferTime = ((performance.now() - inferStart) / 1000).toFixed(2);
 
-      // WAV 生成 & 再生
-      const sampleRate = 44100;
-      const wavBlob = createWavBlob(audioData, sampleRate);
-      const audioUrl = URL.createObjectURL(wavBlob);
+      const outputName = session.outputNames[0];
+      const audioData = results[outputName].data; // Float32Array (音声波形)
+      log(`推論完了: ${inferTime} 秒 (総処理: ${((performance.now() - startTime) / 1000).toFixed(2)} 秒)`);
 
-      audioPlayer.src = audioUrl;
-      downloadBtn.href = audioUrl;
-      downloadBtn.download = `murase_voice_${Date.now()}.wav`;
+      // Web Audio API で再生
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+      }
+      if (audioCtx.state === "suspended") {
+        await audioCtx.resume();
+      }
 
-      audioArea.style.display = 'flex';
-      audioPlayer.play();
-      statusText.textContent = '合成完了！';
-      btn.textContent = 'もう一度音声を生成';
+      const audioBuffer = audioCtx.createBuffer(1, audioData.length, 44100);
+      audioBuffer.copyToChannel(audioData, 0);
+
+      const source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioCtx.destination);
+      source.start();
+
+      log("🔊 再生中...");
     } catch (err) {
+      log(`❌ エラー: ${err.message}`);
       console.error(err);
-      statusText.textContent = 'エラーが発生しました。コンソール(F12)をご確認ください。';
     } finally {
-      btn.disabled = false;
-      progress.style.display = 'none';
+      playBtn.disabled = false;
     }
-  });
+  }
+
+  playBtn.addEventListener("click", synthesizeAndPlay);
 </script>
 
 </body>
