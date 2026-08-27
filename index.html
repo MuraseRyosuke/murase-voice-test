@@ -202,26 +202,54 @@
 
   // モデルのダウンロード＆セッション作成
   async function loadModel() {
-    statusText.textContent = 'モデルをダウンロード中...（約50MB / Wi-Fi推奨）';
-    progress.style.display = 'block';
-    progressFill.style.width = '40%';
+  // 分割ファイルのパス一覧（すべて25MB未満）
+  const chunkUrls = [
+    './model_part0.bin',
+    './model_part1.bin',
+    './model_part2.bin'
+  ];
 
-    try {
-      ort.env.wasm.numThreads = navigator.hardwareConcurrency ? Math.min(4, navigator.hardwareConcurrency) : 2;
+  statusText.textContent = '分割モデルを並列ダウンロード中...';
+  progress.style.display = 'block';
+  progressFill.style.width = '30%';
 
-      session = await ort.InferenceSession.create(MODEL_URL, {
-        executionProviders: ['wasm']
-      });
+  try {
+    // 1. 各チャンクを並列ダウンロード
+    const buffers = await Promise.all(
+      chunkUrls.map(async (url) => {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`ダウンロード失敗: ${url}`);
+        return await res.arrayBuffer();
+      })
+    );
 
-      progressFill.style.width = '100%';
-      statusText.textContent = 'モデルの読み込み完了！';
-      agreementBox.style.display = 'none'; // 同意後はバナーを隠す
-    } catch (err) {
-      statusText.textContent = 'モデルの読み込みに失敗しました。';
-      console.error(err);
-      throw err;
+    progressFill.style.width = '70%';
+    statusText.textContent = 'モデルを結合中...';
+
+    // 2. メモリ上でバイナリを1つに結合
+    const totalLength = buffers.reduce((sum, buf) => sum + buf.byteLength, 0);
+    const combinedArray = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const buf of buffers) {
+      combinedArray.set(new Uint8Array(buf), offset);
+      offset += buf.byteLength;
     }
+
+    // 3. ArrayBuffer から直接 ONNX セッションを作成
+    ort.env.wasm.numThreads = navigator.hardwareConcurrency ? Math.min(4, navigator.hardwareConcurrency) : 2;
+    session = await ort.InferenceSession.create(combinedArray.buffer, {
+      executionProviders: ['wasm']
+    });
+
+    progressFill.style.width = '100%';
+    statusText.textContent = 'モデルの読み込み完了！';
+    agreementBox.style.display = 'none';
+  } catch (err) {
+    statusText.textContent = 'モデルのロードに失敗しました。';
+    console.error(err);
+    throw err;
   }
+}
 
   // Float32Array波形からWAV Blobを生成
   function createWavBlob(samples, sampleRate = 44100) {
