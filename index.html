@@ -368,7 +368,7 @@
 
       statusText.textContent = '音声を生成中...';
 
-      // 3. VITS 入力テンソルの構築
+      // 3. VITS 入力テンソルの動的構築
       const dummyPhones = new BigInt64Array(seqLen).map((_, i) => BigInt((i % 20) + 1));
       const dummyTones = new BigInt64Array(seqLen).fill(0n);
 
@@ -384,8 +384,13 @@
           vitsFeeds[name] = new ort.Tensor('int64', dummyTones, [1, seqLen]);
         } else if (name === 'language' || name === 'lang_ids') {
           vitsFeeds[name] = new ort.Tensor('int64', new BigInt64Array(seqLen).fill(0n), [1, seqLen]);
-        } else if (name === 'bert' || name === 'ja_bert') {
+        } else if (name === 'ja_bert' || name === 'bert') {
           vitsFeeds[name] = bertFeatures;
+        } else if (name.includes('bert')) {
+          // en_bert, zh_bert などの多言語用ダミーゼロテンソル
+          const dims = bertFeatures.dims;
+          const totalElements = dims.reduce((a, b) => a * b, 1);
+          vitsFeeds[name] = new ort.Tensor('float32', new Float32Array(totalElements), dims);
         } else if (name === 'style_vec') {
           vitsFeeds[name] = new ort.Tensor('float32', new Float32Array(256), [1, 1, 256]);
         } else if (name === 'noise_scale') {
@@ -396,6 +401,9 @@
           vitsFeeds[name] = new ort.Tensor('float32', Float32Array.from([0.8]), [1]);
         } else if (name === 'sdp_ratio') {
           vitsFeeds[name] = new ort.Tensor('float32', Float32Array.from([0.2]), [1]);
+        } else {
+          // その他未知の入力に対するフォールバック
+          vitsFeeds[name] = new ort.Tensor('float32', Float32Array.from([0.0]), [1]);
         }
       }
 
