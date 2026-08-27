@@ -161,7 +161,7 @@
 <body>
 
 <div class="container">
-  <h1>村瀬大介 音声プレイヤー (Web Test)</h1>
+  <h1>村瀬亮介 音声プレイヤー (Web Test)</h1>
   <p class="sub">Style-BERT-VITS2 INT8 ブラウザ推論</p>
 
   <!-- Wi-Fi推奨 警告バナー -->
@@ -192,24 +192,23 @@
   let bertSession = null;
   let bertVocab = {};
 
-  // --- 分割ファイル・辞書のパス設定 ---
-  // ※ ファイルをフォルダ配下に置いている場合は './models/bert_part0.bin' 等に適宜書き換えてください
+  // --- 分割ファイル・辞書のパス設定 (modelsフォルダ配下) ---
   const VITS_CHUNKS = [
-    './model_part0.bin',
-    './model_part1.bin',
-    './model_part2.bin'
+    './models/model_part0.bin',
+    './models/model_part1.bin',
+    './models/model_part2.bin'
   ];
 
   const BERT_CHUNKS = [
-    './bert_part0.bin',
-    './bert_part1.bin',
-    './bert_part2.bin',
-    './bert_part3.bin',
-    './bert_part4.bin',
-    './bert_part5.bin'
+    './models/bert_part0.bin',
+    './models/bert_part1.bin',
+    './models/bert_part2.bin',
+    './models/bert_part3.bin',
+    './models/bert_part4.bin',
+    './models/bert_part5.bin'
   ];
 
-  const VOCAB_URL = './vocab.txt';
+  const VOCAB_URL = './models/vocab.txt';
 
   const btn = document.getElementById('actionBtn');
   const statusText = document.getElementById('status-text');
