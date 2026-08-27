@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Style-BERT-VITS2 Web Player (Test)</title>
+  <style>
+    :root {
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #1e293b;
+      --border: #e2e8f0;
+      --accent: #f59e0b;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 520px;
+      background: var(--card-bg);
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+      border: 1px solid var(--border);
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      margin-top: 0;
+      margin-bottom: 6px;
+      text-align: center;
+    }
+
+    p.sub {
+      font-size: 0.85rem;
+      color: #64748b;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    /* 同意バナー */
+    .banner {
+      background-color: #fffbeb;
+      border: 1px solid #fef3c7;
+      border-left: 4px solid var(--accent);
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+
+    .banner strong {
+      color: #b45309;
+    }
+
+    textarea {
+      width: 100%;
+      height: 90px;
+      box-sizing: border-box;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-size: 0.95rem;
+      resize: vertical;
+      margin-bottom: 16px;
+    }
+
+    textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      font-size: 1rem;
+      font-weight: 600;
+      color: white;
+      background-color: var(--primary);
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn:hover:not(:disabled) {
+      background-color: var(--primary-hover);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: #e2e8f0;
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 16px 0;
+      display: none;
+    }
+
+    .progress-fill {
+      width: 0%;
+      height: 100%;
+      background: var(--primary);
+      transition: width 0.2s;
+    }
+
+    #status-text {
+      font-size: 0.85rem;
+      color: #64748b;
+      text-align: center;
+      margin-top: 8px;
+    }
+
+    .audio-player-area {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    audio {
+      width: 100%;
+    }
+
+    .download-link {
+      display: block;
+      text-align: center;
+      text-decoration: none;
+      color: var(--primary);
+      font-weight: 600;
+      font-size: 0.9rem;
+      padding: 8px;
+      border: 1px dashed var(--primary);
+      border-radius: 6px;
+      background: #eef2ff;
+    }
+  </style>
+
+  <!-- ONNX Runtime Web CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+</head>
+<body>
+
+<div class="container">
+  <h1>村瀬大介 音声プレイヤー (Web Test)</h1>
+  <p class="sub">Style-BERT-VITS2 INT8 ブラウザ推論</p>
+
+  <!-- Wi-Fi推奨 警告バナー -->
+  <div id="agreement-box" class="banner">
+    <strong>⚠️ データ通信量のご注意</strong><br>
+    ブラウザ上で直接音声を生成するため、初回実行時に量子化モデルデータ（約50MB）をダウンロードします。<strong>Wi-Fi環境でのご利用を推奨します。</strong>
+  </div>
+
+  <textarea id="inputText" placeholder="話させたいテキストを入力してください...">こんにちは。ブラウザ上で動作するStyle-BERT-VITS2の音声テストです。</textarea>
+
+  <button id="actionBtn" class="btn">モデルを読み込んで音声を生成</button>
+
+  <div id="progress" class="progress-bar">
+    <div id="progress-fill" class="progress-fill"></div>
+  </div>
+
+  <div id="status-text"></div>
+
+  <!-- 生成後のオーディオ・ダウンロード -->
+  <div id="audio-area" class="audio-player-area">
+    <audio id="audioPlayer" controls></audio>
+    <a id="downloadBtn" class="download-link" href="#" download="voice.wav">📥 音声ファイル (.wav) を保存</a>
+  </div>
+</div>
+
+<script>
+  let session = null;
+  const MODEL_URL = './model_int8.onnx';
+
+  const btn = document.getElementById('actionBtn');
+  const statusText = document.getElementById('status-text');
+  const progress = document.getElementById('progress');
+  const progressFill = document.getElementById('progress-fill');
+  const audioArea = document.getElementById('audio-area');
+  const audioPlayer = document.getElementById('audioPlayer');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const agreementBox = document.getElementById('agreement-box');
+
+  // モデルのダウンロード＆セッション作成
+  async function loadModel() {
+    statusText.textContent = 'モデルをダウンロード中...（約50MB / Wi-Fi推奨）';
+    progress.style.display = 'block';
+    progressFill.style.width = '40%';
+
+    try {
+      ort.env.wasm.numThreads = navigator.hardwareConcurrency ? Math.min(4, navigator.hardwareConcurrency) : 2;
+
+      session = await ort.InferenceSession.create(MODEL_URL, {
+        executionProviders: ['wasm']
+      });
+
+      progressFill.style.width = '100%';
+      statusText.textContent = 'モデルの読み込み完了！';
+      agreementBox.style.display = 'none'; // 同意後はバナーを隠す
+    } catch (err) {
+      statusText.textContent = 'モデルの読み込みに失敗しました。';
+      console.error(err);
+      throw err;
+    }
+  }
+
+  // Float32Array波形からWAV Blobを生成
+  function createWavBlob(samples, sampleRate = 44100) {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+
+    function writeString(offset, string) {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + samples.length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, 1, true); // Mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, samples.length * 2, true);
+
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++, offset += 2) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+
+    return new Blob([view], { type: 'audio/wav' });
+  }
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+
+    try {
+      if (!session) {
+        await loadModel();
+      }
+
+      statusText.textContent = '音声を生成中...';
+
+      // ==========================================
+      // Style-BERT-VITS2 の推論処理
+      // ==========================================
+      // 実際の推論テンソル入力例（モデルの入力名に合わせて渡します）
+      /*
+      const feeds = {
+        phones: new ort.Tensor('int64', phonesArray, [1, phonesArray.length]),
+        tones: new ort.Tensor('int64', tonesArray, [1, tonesArray.length]),
+        bert: new ort.Tensor('float32', bertArray, [1, 1024, phonesArray.length]),
+        style: new ort.Tensor('float32', styleVector, [1, 256]),
+      };
+      const results = await session.run(feeds);
+      const audioData = results.audio.data;
+      */
+
+      // 動作検証用のモック波形（サンプリングレート44.1kHzで1.5秒）
+      const sampleRate = 44100;
+      const dummySamples = new Float32Array(sampleRate * 1.5);
+      for (let i = 0; i < dummySamples.length; i++) {
+        // 440Hz（ラ）のサイン波テスト音
+        dummySamples[i] = Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 0.2;
+      }
+
+      const wavBlob = createWavBlob(dummySamples, sampleRate);
+      const audioUrl = URL.createObjectURL(wavBlob);
+
+      audioPlayer.src = audioUrl;
+      downloadBtn.href = audioUrl;
+      downloadBtn.download = `voice_${Date.now()}.wav`;
+
+      audioArea.style.display = 'flex';
+      statusText.textContent = '生成完了！';
+      btn.textContent = '音声を生成する';
+    } catch (e) {
+      console.error(e);
+      statusText.textContent = 'エラーが発生しました。コンソールログを確認してください。';
+    } finally {
+      btn.disabled = false;
+      progress.style.display = 'none';
+    }
+  });
+</script>
+
+</body>
+</html>
