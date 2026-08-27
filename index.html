@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Style-BERT-VITS2 音声合成テスト</title>
-  <!-- 量子化演算子 (ConvInteger等) を完全収録したフル版 ort.all.min.js -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/ort.all.min.js"></script>
   <style>
     body {
@@ -110,29 +109,32 @@
       document.getElementById("status").textContent = msg;
     }
 
-    // models/model_part0.bin 〜 model_part2.bin の結合ロード
+    // models/model_part0.bin から順に自動探索して結合ロード
     async function loadModel() {
-      setStatus("モデルファイル (models/model_part*.bin) を読み込み中...");
+      setStatus("モデルファイル (models/model_part*.bin) を探索・読み込み中...");
       
-      const partFiles = [
-        "./models/model_part0.bin",
-        "./models/model_part1.bin",
-        "./models/model_part2.bin"
-      ];
-
       const chunks = [];
-      for (const file of partFiles) {
-        log(`チャンク読み込み中: ${file}`);
-        const res = await fetch(file);
-        if (!res.ok) {
-          throw new Error(`${file} の取得に失敗しました (Status: ${res.status})`);
+      let idx = 0;
+      
+      while (true) {
+        const partPath = `./models/model_part${idx}.bin`;
+        try {
+          const res = await fetch(partPath);
+          if (!res.ok) {
+            if (idx === 0) throw new Error(`${partPath} が見つかりません。`);
+            break; // 全チャンク読み込み完了
+          }
+          const buf = await res.arrayBuffer();
+          chunks.push(new Uint8Array(buf));
+          log(`✓ チャンク読み込み: model_part${idx}.bin (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+          idx++;
+        } catch (e) {
+          if (idx === 0) throw e;
+          break;
         }
-        const buf = await res.arrayBuffer();
-        chunks.push(new Uint8Array(buf));
-        log(`✓ 完了: ${file} (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
       }
 
-      log("モデルバイナリを結合中...");
+      log(`合計 ${chunks.length} 個のチャンクを結合中...`);
       const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
       const merged = new Uint8Array(totalLength);
       let offset = 0;
@@ -162,7 +164,7 @@
         if (!res.ok) throw new Error("exact_input.json が見つかりません。");
         const payload = await res.json();
 
-        // ノイズ低減 & 決定論的生成パラメータの適用
+        // ノイズ低減パラメータの適用
         if (payload.noise_scale) payload.noise_scale.data = [0.35];
         if (payload.noise_scale_w) payload.noise_scale_w.data = [0.6];
         if (payload.sdp_ratio) payload.sdp_ratio.data = [0.0];
@@ -203,7 +205,7 @@
         const outputName = session.outputNames[0];
         const audioData = results[outputName].data;
 
-        // Web Audio API による再生
+        // 音声再生
         if (!audioCtx) {
           audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
         }
