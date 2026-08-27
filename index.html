@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Style-BERT-VITS2 音声合成テスト</title>
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/ort.min.js"></script>
+  <!-- 量子化演算子 (ConvInteger等) を完全収録したフル版 ort.all.min.js -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/ort.all.min.js"></script>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -92,7 +93,6 @@
   <div id="log">ログがここに表示されます...</div>
 
   <script>
-    // GitHub Pages 向けの安全な WASM 設定 (シングルスレッド + SIMD)
     ort.env.wasm.numThreads = 1;
     ort.env.wasm.simd = true;
 
@@ -162,7 +162,7 @@
         if (!res.ok) throw new Error("exact_input.json が見つかりません。");
         const payload = await res.json();
 
-        // ノイズ低減 & 決定論的生成のパラメータ補正
+        // ノイズ低減 & 決定論的生成パラメータの適用
         if (payload.noise_scale) payload.noise_scale.data = [0.35];
         if (payload.noise_scale_w) payload.noise_scale_w.data = [0.6];
         if (payload.sdp_ratio) payload.sdp_ratio.data = [0.0];
@@ -180,7 +180,6 @@
           const item = payload[sourceKey] || payload[aliasMap[sourceKey]];
           if (item) {
             let shape = [...item.shape];
-            // style_vec の 3次元 rank 補正
             if (inputName.includes("style") && shape.length === 2) {
               shape = [1, 1, 256];
             }
@@ -204,7 +203,7 @@
         const outputName = session.outputNames[0];
         const audioData = results[outputName].data;
 
-        // Web Audio API で再生
+        // Web Audio API による再生
         if (!audioCtx) {
           audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
         }
