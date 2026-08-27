@@ -67,6 +67,7 @@
       color: #334155;
       margin-bottom: 16px;
       border: 1px solid var(--border);
+      line-height: 1.5;
     }
 
     .btn {
@@ -79,6 +80,11 @@
       border: none;
       border-radius: 8px;
       cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn:hover:not(:disabled) {
+      background-color: var(--primary-hover);
     }
 
     .btn:disabled {
@@ -144,7 +150,7 @@
 
   <div class="banner">
     <strong>⚠️ データ通信量のご注意</strong><br>
-    ブラウザ上で直接音声を生成するため、初回実行時に量子化モデルデータ（分割バイナリ 計約50MB）をダウンロードします。Wi-Fi環境でのご利用を推奨します。
+    ブラウザ上で直接音声を生成するため、初回実行時に量子化モデルデータ（約50MB）をダウンロードします。Wi-Fi環境でのご利用を推奨します。
   </div>
 
   <div style="font-size:0.85rem; color:#64748b; margin-bottom:6px;">再生対象テキスト:</div>
@@ -183,6 +189,7 @@
   const audioPlayer = document.getElementById('audioPlayer');
   const downloadBtn = document.getElementById('downloadBtn');
 
+  // 分割バイナリを並列取得して結合
   async function fetchAndCombineChunks(chunkUrls) {
     const buffers = await Promise.all(
       chunkUrls.map(async (url) => {
@@ -202,6 +209,7 @@
     return combinedArray.buffer;
   }
 
+  // モデルの初期化
   async function loadModel() {
     progress.style.display = 'block';
     progressFill.style.width = '30%';
@@ -221,6 +229,7 @@
     progressFill.style.width = '100%';
   }
 
+  // WAV Blob 生成 (44.1kHz)
   function createWavBlob(samples, sampleRate = 44100) {
     const buffer = new ArrayBuffer(44 + samples.length * 2);
     const view = new DataView(buffer);
@@ -254,6 +263,11 @@
     return new Blob([view], { type: 'audio/wav' });
   }
 
+  // int64型を要求する既知の入力名一覧
+  const INT64_INPUTS = new Set([
+    'x_tst', 'x_tst_lengths', 'speakers', 'sid', 'tones', 'language', 'lang_ids'
+  ]);
+
   btn.addEventListener('click', async () => {
     btn.disabled = true;
 
@@ -264,40 +278,49 @@
 
       statusText.textContent = '特徴量データを読み込み、音声を合成中...';
 
-      // 正確なテンソルJSONをフェッチ
+      // exact_input.json の取得
       const inputRes = await fetch('./exact_input.json');
       if (!inputRes.ok) throw new Error('exact_input.json が見つかりません');
       const inputData = await inputRes.json();
 
       const feeds = {};
-      for (const name of vitsSession.inputNames) {
-        if (!(name in inputData)) {
-          feeds[name] = new ort.Tensor('float32', Float32Array.from([0.0]), [1]);
-          continue;
-        }
+      const phoneSeqLen = inputData.x_tst ? inputData.x_tst.shape[1] : 82;
 
-        const item = inputData[name];
-        if (item.dtype === 'int64') {
-          feeds[name] = new ort.Tensor(
-            'int64',
-            BigInt64Array.from(item.data.map(BigInt)),
-            item.shape
-          );
+      for (const name of vitsSession.inputNames) {
+        if (name in inputData) {
+          const item = inputData[name];
+          if (item.dtype === 'int64' || INT64_INPUTS.has(name)) {
+            feeds[name] = new ort.Tensor(
+              'int64',
+              BigInt64Array.from(item.data.map(BigInt)),
+              item.shape
+            );
+          } else {
+            feeds[name] = new ort.Tensor(
+              'float32',
+              new Float32Array(item.data),
+              item.shape
+            );
+          }
         } else {
-          feeds[name] = new ort.Tensor(
-            'float32',
-            new Float32Array(item.data),
-            item.shape
-          );
+          // 未定義入力の型別フォールバック
+          if (INT64_INPUTS.has(name)) {
+            const isSeq = (name === 'tones' || name === 'language' || name === 'lang_ids');
+            const shape = isSeq ? [1, phoneSeqLen] : [1];
+            const data = new BigInt64Array(isSeq ? phoneSeqLen : 1).fill(0n);
+            feeds[name] = new ort.Tensor('int64', data, shape);
+          } else {
+            feeds[name] = new ort.Tensor('float32', Float32Array.from([0.0]), [1]);
+          }
         }
       }
 
-      // ONNX 推論
+      // ONNX 推論実行
       const results = await vitsSession.run(feeds);
       const outputKey = vitsSession.outputNames[0];
       const audioData = results[outputKey].data;
 
-      // WAV 作成 & 再生
+      // WAV 生成 & 再生
       const sampleRate = 44100;
       const wavBlob = createWavBlob(audioData, sampleRate);
       const audioUrl = URL.createObjectURL(wavBlob);
