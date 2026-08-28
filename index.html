@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Style-BERT-VITS2 完全ブラウザ音声合成プレイヤー</title>
+  <!-- ONNX Runtime Web フルビルド -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/ort.all.min.js"></script>
   <style>
     body {
@@ -140,9 +141,9 @@
   <div class="notice">
     <strong>【動作環境およびファイルサイズについて】</strong>
     <ul>
-      <li>自由入力の合成を行うため、ブラウザ上で <strong>BERTモデル（約107MB）</strong> と <strong>VITSモデル（約189MB）</strong> の合計 <strong>約296MB</strong> を初回のみダウンロード・初期化します。</li>
+      <li>自由入力の合成を行うため、ブラウザ上で <strong>BERTモデル（約107MB）</strong> と <strong>VITSモデル（約189MB）</strong> の合計 <strong>約296MB</strong> を順次ダウンロード・推論します。</li>
+      <li>メモリの枯渇を防ぐため、BERT推論完了後にメモリを自動解放してから音声モデルを実行します。</li>
       <li>一度生成した文章の音声はブラウザにキャッシュされ、再合成なしで即座に再生・シーク可能です。</li>
-      <li>メモリ消費が大きいため、PCのモダンブラウザ（Chrome, Edge, Firefox等）での実行を推奨します。</li>
     </ul>
   </div>
 
@@ -171,6 +172,7 @@
   <div id="log">ログがここに表示されます...</div>
 
   <script>
+    // WASM メモリ最適化設定
     ort.env.wasm.numThreads = 1;
     ort.env.wasm.simd = true;
 
@@ -179,6 +181,11 @@
     let symbolToId = null;
     let currentBlob = null;
     const audioCache = new Map();
+
+    // Style-BERT-VITS2 公式標準シンボルリスト (フォールバック用)
+    const DEFAULT_SYMBOLS = [
+      "_", ",", ".", "!", "?", "-", "A", "I", "U", "E", "O", "a", "b", "by", "ch", "cl", "d", "dy", "e", "f", "g", "gy", "h", "hy", "i", "j", "k", "ky", "m", "my", "n", "ny", "N", "o", "p", "py", "r", "ry", "s", "sh", "t", "ts", "u", "v", "w", "y", "z", "q", "ー", "SP", "UNK"
+    ];
 
     const audioPlayer = document.getElementById("audioPlayer");
     const downloadBtn = document.getElementById("downloadBtn");
@@ -203,48 +210,64 @@
       progressBar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
     }
 
-    // 1. 辞書読み込み (配列 / オブジェクト / 逆引きマップ完全対応)
+    // 1. 辞書の読み込み
     async function loadDictionaries() {
       if (vocabMap && symbolToId && symbolToId.size > 0) return;
       setStatus("辞書ファイル (vocab.txt, symbols.json) を読み込み中...");
 
       // vocab.txt
-      const vocabRes = await fetch("./models/vocab.txt");
-      if (!vocabRes.ok) throw new Error("models/vocab.txt の読み込みに失敗しました。");
-      const vocabText = await vocabRes.text();
-      vocabMap = new Map();
-      vocabText.split(/\r?\n/).forEach((line, idx) => {
-        const token = line.trim();
-        if (token) vocabMap.set(token, idx);
-      });
-
-      // symbols.json
-      const symRes = await fetch("./models/symbols.json");
-      if (!symRes.ok) throw new Error("models/symbols.json の読み込みに失敗しました。");
-      const raw = await symRes.json();
-      
-      symbolToId = new Map();
-      if (Array.isArray(raw)) {
-        raw.forEach((s, idx) => symbolToId.set(s, idx));
-      } else if (raw.symbols && Array.isArray(raw.symbols)) {
-        raw.symbols.forEach((s, idx) => symbolToId.set(s, idx));
-      } else if (typeof raw === "object" && raw !== null) {
-        const entries = Object.entries(raw);
-        if (entries.length > 0) {
-          // {"_": 0, "a": 1} 形式か {"0": "_", "1": "a"} 形式かを判定
-          if (typeof entries[0][1] === "number") {
-            entries.forEach(([k, v]) => symbolToId.set(k, v));
-          } else {
-            entries.forEach(([k, v]) => symbolToId.set(v, parseInt(k, 10)));
-          }
+      try {
+        const vocabRes = await fetch("./models/vocab.txt");
+        if (vocabRes.ok) {
+          const vocabText = await vocabRes.text();
+          vocabMap = new Map();
+          vocabText.split(/\r?\n/).forEach((line, idx) => {
+            const token = line.trim();
+            if (token) vocabMap.set(token, idx);
+          });
         }
+      } catch (e) {
+        log("⚠️ vocab.txt の読み込みに失敗しました。");
       }
 
-      log(`✓ 辞書ロード完了 (語彙数: ${vocabMap.size}, 音素シンボル数: ${symbolToId.size})`);
+      // symbols.json の自動パース
+      symbolToId = new Map();
+      try {
+        const symRes = await fetch("./models/symbols.json");
+        if (symRes.ok) {
+          const raw = await symRes.json();
+          let list = [];
+          if (Array.isArray(raw)) {
+            list = raw;
+          } else if (raw.symbols && Array.isArray(raw.symbols)) {
+            list = raw.symbols;
+          } else if (typeof raw === "object") {
+            const entries = Object.entries(raw);
+            if (entries.length > 0) {
+              if (typeof entries[0][1] === "number") {
+                entries.forEach(([k, v]) => symbolToId.set(k, v));
+              } else {
+                entries.forEach(([k, v]) => symbolToId.set(v, parseInt(k, 10)));
+              }
+            }
+          }
+          if (list.length > 0) {
+            list.forEach((s, idx) => symbolToId.set(s, idx));
+          }
+        }
+      } catch (e) {}
+
+      // フォールバック
+      if (symbolToId.size === 0) {
+        DEFAULT_SYMBOLS.forEach((s, idx) => symbolToId.set(s, idx));
+        log("ℹ️ 標準フォールバックシンボルを適用しました。");
+      }
+
+      log(`✓ 辞書ロード完了 (語彙数: ${vocabMap ? vocabMap.size : 0}, 音素シンボル数: ${symbolToId.size})`);
     }
 
-    // 2. 分割バイナリのダウンロード・結合 (正確な ArrayBuffer を作成)
-    async function fetchCleanBinary(prefix, maxCount, label, startPct, endPct) {
+    // 2. 分割バイナリを Blob URL としてロード
+    async function fetchModelAsBlobUrl(prefix, maxCount, label, startPct, endPct) {
       const chunks = [];
       for (let idx = 0; idx < maxCount; idx++) {
         const path = `${prefix}${idx}.bin`;
@@ -262,14 +285,15 @@
       }
 
       const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
-      const cleanBuffer = new ArrayBuffer(totalLen);
-      const cleanView = new Uint8Array(cleanBuffer);
+      const merged = new Uint8Array(totalLen);
       let offset = 0;
       for (const chunk of chunks) {
-        cleanView.set(chunk, offset);
+        merged.set(chunk, offset);
         offset += chunk.length;
       }
-      return cleanBuffer;
+
+      const blob = new Blob([merged], { type: "application/octet-stream" });
+      return URL.createObjectURL(blob);
     }
 
     // 3. G2P テキスト解析
@@ -299,7 +323,7 @@
       const phones = ["_"];
       const tones = [0];
       const word2ph = [1];
-      const inputIds = [vocabMap.get("[CLS]") || 2];
+      const inputIds = [vocabMap ? (vocabMap.get("[CLS]") || 2) : 2];
 
       let i = 0;
       while (i < normalized.length) {
@@ -323,7 +347,7 @@
         }
 
         const rawChar = text[i - matchedKana.length] || matchedKana;
-        const tokenId = vocabMap.get(rawChar) || vocabMap.get(matchedKana) || vocabMap.get("[UNK]") || 1;
+        const tokenId = vocabMap ? (vocabMap.get(rawChar) || vocabMap.get(matchedKana) || vocabMap.get("[UNK]") || 1) : 1;
         inputIds.push(tokenId);
 
         let count = 0;
@@ -338,12 +362,12 @@
       phones.push("_");
       tones.push(0);
       word2ph.push(1);
-      inputIds.push(vocabMap.get("[SEP]") || 3);
+      inputIds.push(vocabMap ? (vocabMap.get("[SEP]") || 3) : 3);
 
       return { phones, tones, word2ph, inputIds };
     }
 
-    // 4. 音声合成メイン関数
+    // 4. 音声合成メイン関数（直列実行 ＆ メモリ最小化）
     async function synthesizeFromText() {
       const text = document.getElementById("inputText").value.trim();
       if (!text) {
@@ -368,7 +392,7 @@
         await loadDictionaries();
 
         const tStart = performance.now();
-        setStatus("テキストを音素・トークンに分解中...");
+        setStatus("テキスト解析中...");
         const { phones, tones, word2ph, inputIds } = processText(text);
         const phoneLen = phones.length;
         const phoneIds = phones.map(p => symbolToId.has(p) ? symbolToId.get(p) : 0);
@@ -376,14 +400,19 @@
         log(`音素数: ${phoneLen}, BERTトークン数: ${inputIds.length}`);
 
         // --- STEP 1: BERT 特徴量抽出 ---
-        const bertBuffer = await fetchCleanBinary("./models/bert_part", 6, "BERT モデル", 5, 45);
+        const bertBlobUrl = await fetchModelAsBlobUrl("./models/bert_part", 6, "BERT モデル", 5, 45);
 
         setStatus("BERT 特徴量を推論中 (ONNX)...");
         log("・BERT セッションを初期化中...");
-        
-        const bertSession = await ort.InferenceSession.create(bertBuffer, {
-          executionProviders: ['wasm']
-        });
+
+        const sessionOptions = {
+          executionProviders: ['wasm'],
+          graphOptimizationLevel: 'basic',
+          enableCpuMemArena: false
+        };
+
+        const bertSession = await ort.InferenceSession.create(bertBlobUrl, sessionOptions);
+        URL.revokeObjectURL(bertBlobUrl); // ロード後に URL 解放
 
         const seqLen = inputIds.length;
         const bertFeeds = {
@@ -411,17 +440,16 @@
           }
         }
 
-        // BERT セッションのメモリ解放
+        // BERT セッションの完全解放
         await bertSession.release();
-        log("✓ BERT 推論完了（セッションメモリ解放済み）");
+        log("✓ BERT 推論完了（メモリ解放済み）");
 
         // --- STEP 2: VITS 音声波形生成 ---
-        const vitsBuffer = await fetchCleanBinary("./models/model_part", 10, "VITS モデル", 50, 95);
+        const vitsBlobUrl = await fetchModelAsBlobUrl("./models/model_part", 10, "VITS モデル", 50, 95);
         
         setStatus("VITS 音声モデルを初期化中...");
-        const vitsSession = await ort.InferenceSession.create(vitsBuffer, {
-          executionProviders: ['wasm']
-        });
+        const vitsSession = await ort.InferenceSession.create(vitsBlobUrl, sessionOptions);
+        URL.revokeObjectURL(vitsBlobUrl);
         log("✅ VITS セッションの初期化完了");
 
         setStatus("VITS で音声波形を生成中...");
