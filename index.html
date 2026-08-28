@@ -44,7 +44,7 @@
       font-size: 0.9rem;
       color: #1e293b;
     }
-    select, textarea {
+    textarea {
       width: 100%;
       box-sizing: border-box;
       padding: 10px 12px;
@@ -52,12 +52,9 @@
       border: 1px solid #cbd5e1;
       font-size: 0.95rem;
       font-family: inherit;
-      background-color: #fff;
-    }
-    textarea {
+      background-color: #f8fafc;
       resize: vertical;
       min-height: 60px;
-      background-color: #f8fafc;
     }
     .player-card {
       background: #f8fafc;
@@ -129,30 +126,22 @@
     <strong>【ご利用上の注意・前提事項】</strong>
     <ul>
       <li>ブラウザ上で直接モデル推論を行うため、初回ロードと初回生成に数十秒〜数分かかる場合があります。</li>
-      <li>一度生成した音声はキャッシュされ、プレイヤーのシークバーや再生ボタンで自由に操作・リプレイできます。</li>
-      <li>事前抽出されたテンソルデータ（プリセット）を選択して音声合成を実行します。</li>
+      <li>一度生成した音声はプレイヤーに保持され、一時停止・シークバー操作・音量調整が自由に行えます。</li>
+      <li>現在は事前抽出された正規テンソルデータ（exact_input.json）を読み込んで合成を実行します。</li>
     </ul>
   </div>
 
   <div class="form-group">
-    <label for="presetSelect">発話プリセットの選択:</label>
-    <select id="presetSelect" onchange="onSelectPreset()">
-      <option value="exact_input.json" data-text="こんにちは。村瀬亮介の音声テストプレイヤーへようこそ。ブラウザ上で動作しています。">こんにちは。村瀬亮介の音声テストプレイヤーへようこそ。ブラウザ上で動作しています。</option>
-      <option value="test_input.json" data-text="テスト音声データ (test_input.json)">テスト音声データ (test_input.json)</option>
-    </select>
-  </div>
-
-  <div class="form-group">
-    <label for="inputText">選択中の発話テキスト:</label>
+    <label for="inputText">発話テキスト（現在ロードされているテンソルの内容）:</label>
     <textarea id="inputText" readonly>こんにちは。村瀬亮介の音声テストプレイヤーへようこそ。ブラウザ上で動作しています。</textarea>
   </div>
 
   <div class="button-group">
-    <button id="playBtn" onclick="synthesize()">音声を合成して読み込む</button>
+    <button id="playBtn" onclick="synthesize()">音声を合成してプレイヤーに読み込む</button>
   </div>
 
   <div class="player-card">
-    <label>🔊 音声プレイヤー（一時停止・シーク・音量調整）:</label>
+    <label>🔊 音声コントロール（再生・一時停止・シークバー・音量）:</label>
     <audio id="audioPlayer" controls></audio>
     <div>
       <button id="downloadBtn" class="success" onclick="downloadWav()" disabled>WAVを保存</button>
@@ -168,7 +157,6 @@
 
     let session = null;
     let currentBlob = null;
-    const audioCache = new Map(); // プリセットごとのWAV Blobキャッシュ
     const SAMPLE_RATE = 44100;
 
     const audioPlayer = document.getElementById("audioPlayer");
@@ -184,65 +172,6 @@
 
     function setStatus(msg) {
       document.getElementById("status").textContent = msg;
-    }
-
-    // 起動時に models/presets.json を安全にパース
-    window.addEventListener("DOMContentLoaded", async () => {
-      try {
-        const res = await fetch("./models/presets.json?t=" + Date.now());
-        if (res.ok) {
-          const data = await res.json();
-          const select = document.getElementById("presetSelect");
-          
-          let items = [];
-          if (Array.isArray(data)) {
-            items = data;
-          } else if (typeof data === "object" && data !== null) {
-            items = Object.keys(data).map(k => ({
-              file: k.endsWith(".json") ? k : `${k}.json`,
-              text: typeof data[k] === "string" ? data[k] : (data[k].text || k)
-            }));
-          }
-
-          if (items.length > 0) {
-            select.innerHTML = "";
-            items.forEach((p, idx) => {
-              const opt = document.createElement("option");
-              opt.value = p.file || p.json || (idx === 0 ? "exact_input.json" : `preset_${idx}.json`);
-              const textContent = p.text || p.title || `プリセット ${idx + 1}`;
-              opt.textContent = textContent;
-              opt.dataset.text = textContent;
-              select.appendChild(opt);
-            });
-            onSelectPreset();
-            log("✓ models/presets.json からプリセットを展開しました。");
-          }
-        }
-      } catch (e) {
-        log("※ デフォルトのプリセット定義を使用します。");
-      }
-    });
-
-    function onSelectPreset() {
-      const select = document.getElementById("presetSelect");
-      const selectedOpt = select.options[select.selectedIndex];
-      if (!selectedOpt) return;
-
-      const text = selectedOpt.dataset.text || selectedOpt.textContent;
-      document.getElementById("inputText").value = text;
-      
-      const jsonFile = selectedOpt.value;
-      if (audioCache.has(jsonFile)) {
-        setPlayerSource(audioCache.get(jsonFile));
-        setStatus("生成済みの音声がプレイヤーに読み込まれました（即座に再生可能）");
-      }
-    }
-
-    function setPlayerSource(blob) {
-      currentBlob = blob;
-      const url = URL.createObjectURL(blob);
-      audioPlayer.src = url;
-      downloadBtn.disabled = false;
     }
 
     // 分割モデルの自動結合ロード
@@ -287,13 +216,8 @@
 
     // 音声合成処理
     async function synthesize() {
-      const select = document.getElementById("presetSelect");
-      const jsonFile = select.value || "exact_input.json";
-
-      // キャッシュがある場合は即座に再生
-      if (audioCache.has(jsonFile)) {
-        log(`⚡ キャッシュからプレイヤーへセット: ${jsonFile}`);
-        setPlayerSource(audioCache.get(jsonFile));
+      // 既に生成済み Blob がある場合はプレイヤーを直接再生
+      if (currentBlob) {
         audioPlayer.play();
         setStatus("再生中 🔊");
         return;
@@ -307,9 +231,9 @@
           await loadModel();
         }
 
-        setStatus(`入力データ (${jsonFile}) を読み込み中...`);
-        const res = await fetch(`./${jsonFile}?t=` + Date.now());
-        if (!res.ok) throw new Error(`${jsonFile} が見つかりません。`);
+        setStatus("入力データ (exact_input.json) を読み込み中...");
+        const res = await fetch("./exact_input.json?t=" + Date.now());
+        if (!res.ok) throw new Error("exact_input.json が見つかりません。");
         const payload = await res.json();
 
         // 低ノイズ化パラメータの適用
@@ -352,10 +276,11 @@
         const outputName = session.outputNames[0];
         const audioData = results[outputName].data; // Float32Array
 
-        // WAV Blob に変換してキャッシュ & プレイヤーにセット
-        const wavBlob = encodeWAV(audioData, SAMPLE_RATE);
-        audioCache.set(jsonFile, wavBlob);
-        setPlayerSource(wavBlob);
+        // WAV Blob 作成
+        currentBlob = encodeWAV(audioData, SAMPLE_RATE);
+        const url = URL.createObjectURL(currentBlob);
+        audioPlayer.src = url;
+        downloadBtn.disabled = false;
 
         // 自動再生
         audioPlayer.play();
