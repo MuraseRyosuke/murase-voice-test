@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Style-BERT-VITS2 完全ブラウザ音声合成プレイヤー</title>
-  <!-- ONNX Runtime Web フルビルド -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/ort.all.min.js"></script>
   <style>
     body {
@@ -54,7 +53,7 @@
       font-family: inherit;
       background-color: #fff;
       resize: vertical;
-      min-height: 75px;
+      min-height: 80px;
     }
     .progress-bar-container {
       width: 100%;
@@ -136,20 +135,20 @@
 </head>
 <body>
 
-  <h1>Style-BERT-VITS2 音声合成プレイヤー</h1>
+  <h1>Style-BERT-VITS2 完全ブラウザ音声合成プレイヤー</h1>
 
   <div class="notice">
-    <strong>【動作環境およびファイルサイズについて】</strong>
+    <strong>【動作仕様およびダウンロード容量】</strong>
     <ul>
-      <li>自由入力の合成を行うため、ブラウザ上で <strong>BERTモデル（約107MB）</strong> と <strong>VITSモデル（約189MB）</strong> の合計 <strong>約296MB</strong> を順次ダウンロード・推論します。</li>
-      <li>メモリの枯渇を防ぐため、BERT推論完了後にメモリを自動解放してから音声モデルを実行します。</li>
-      <li>一度生成した文章の音声はブラウザにキャッシュされ、再合成なしで即座に再生・シーク可能です。</li>
+      <li>ブラウザ上で直接音声推論を行うため、初回実行時に <strong>VITS音声合成モデル（約189.4MB）</strong> をダウンロードして結合します。</li>
+      <li>入力されたテキスト（ひらがな・カタカナ推奨）を音素に変換し、ブラウザ単体で音声を合成します。</li>
+      <li>一度生成した音声はキャッシュされ、プレイヤーのシークバー・再生・WAV保存が即座に行えます。</li>
     </ul>
   </div>
 
   <div class="form-group">
-    <label for="inputText">発話テキスト（自由に入力可能）:</label>
-    <textarea id="inputText" placeholder="喋らせたいテキストを入力してください...">こんにちは。ブラウザ上で完全に音声合成を行っています。</textarea>
+    <label for="inputText">発話テキスト（自由に入力可能・ひらがな/カタカナ推奨）:</label>
+    <textarea id="inputText" placeholder="喋らせたいテキストを入力してください...">こんにちは。むらせりょうすけのおんせいてすとぷれいやーへようこそ。ぶらうざじょうでどうさしています。</textarea>
   </div>
 
   <div class="progress-bar-container" id="progressContainer">
@@ -172,18 +171,17 @@
   <div id="log">ログがここに表示されます...</div>
 
   <script>
-    // WASM メモリ最適化設定
     ort.env.wasm.numThreads = 1;
     ort.env.wasm.simd = true;
 
     const SAMPLE_RATE = 44100;
-    let vocabMap = null;
+    let vitsSession = null;
     let symbolToId = null;
     let currentBlob = null;
     const audioCache = new Map();
 
-    // Style-BERT-VITS2 公式標準シンボルマップ (全音素フォールバック)
-    const DEFAULT_SYMBOLS = [
+    // Style-BERT-VITS2 公式完全音素シンボルセット（130種）
+    const OFFICIAL_SYMBOLS = [
       "_", ",", ".", "!", "?", "-", "A", "I", "U", "E", "O", "a", "b", "by", "ch", "cl",
       "d", "dy", "e", "f", "g", "gy", "h", "hy", "i", "j", "k", "ky", "m", "my", "n", "ny",
       "N", "o", "p", "py", "r", "ry", "s", "sh", "t", "ts", "u", "v", "w", "y", "z", "q",
@@ -213,45 +211,24 @@
       progressBar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
     }
 
-    // 1. 辞書の読み込み
-    async function loadDictionaries() {
-      if (vocabMap && symbolToId && symbolToId.size > 0) return;
-      setStatus("辞書ファイル (vocab.txt, symbols.json) を読み込み中...");
+    // 1. 音素辞書の初期化
+    async function initSymbols() {
+      if (symbolToId && symbolToId.size > 0) return;
 
-      // vocab.txt
-      try {
-        const vocabRes = await fetch("./models/vocab.txt");
-        if (vocabRes.ok) {
-          const vocabText = await vocabRes.text();
-          vocabMap = new Map();
-          vocabText.split(/\r?\n/).forEach((line, idx) => {
-            const token = line.trim();
-            if (token) vocabMap.set(token, idx);
-          });
-        }
-      } catch (e) {
-        log("⚠️ vocab.txt の読み込みに失敗しました。");
-      }
-
-      // symbols.json (全形式対応)
       symbolToId = new Map();
       try {
-        const symRes = await fetch("./models/symbols.json");
-        if (symRes.ok) {
-          const raw = await symRes.json();
+        const res = await fetch("./models/symbols.json");
+        if (res.ok) {
+          const raw = await res.json();
           let list = [];
-          if (Array.isArray(raw)) {
-            list = raw;
-          } else if (raw.symbols && Array.isArray(raw.symbols)) {
-            list = raw.symbols;
-          } else if (typeof raw === "object" && raw !== null) {
+          if (Array.isArray(raw)) list = raw;
+          else if (raw.symbols && Array.isArray(raw.symbols)) list = raw.symbols;
+          else if (typeof raw === "object") {
             const entries = Object.entries(raw);
-            if (entries.length > 0) {
-              if (typeof entries[0][1] === "number") {
-                entries.forEach(([k, v]) => symbolToId.set(k, v));
-              } else {
-                entries.forEach(([k, v]) => symbolToId.set(v, parseInt(k, 10)));
-              }
+            if (entries.length > 0 && typeof entries[0][1] === "number") {
+              entries.forEach(([k, v]) => symbolToId.set(k, v));
+            } else {
+              list = Object.values(raw);
             }
           }
           if (list.length > 0) {
@@ -261,19 +238,23 @@
       } catch (e) {}
 
       if (symbolToId.size === 0) {
-        DEFAULT_SYMBOLS.forEach((s, idx) => symbolToId.set(s, idx));
-        log("ℹ️ 標準フォールバックシンボルを適用しました。");
+        OFFICIAL_SYMBOLS.forEach((s, idx) => symbolToId.set(s, idx));
+        log("ℹ️ 公式フォールバック音素シンボルをロードしました。");
       }
-
-      log(`✓ 辞書ロード完了 (語彙数: ${vocabMap ? vocabMap.size : 0}, 音素シンボル数: ${symbolToId.size})`);
+      log(`✓ 音素辞書ロード完了 (シンボル数: ${symbolToId.size})`);
     }
 
-    // 2. 分割バイナリを Uint8Array としてロード
-    async function fetchDirectBinary(prefix, maxCount, label, startPct, endPct) {
+    // 2. VITS モデルバイナリの取得と結合
+    async function loadVitsModel() {
+      if (vitsSession) return;
+
+      setStatus("VITS 音声モデル (約189.4MB) をダウンロード中...");
       const chunks = [];
-      for (let idx = 0; idx < maxCount; idx++) {
-        const path = `${prefix}${idx}.bin`;
-        setStatus(`${label} を取得中... [${idx + 1}/${maxCount}]`);
+      const MAX_CHUNKS = 10;
+
+      for (let idx = 0; idx < MAX_CHUNKS; idx++) {
+        const path = `./models/model_part${idx}.bin`;
+        setStatus(`VITS モデルを取得中... [${idx + 1}/${MAX_CHUNKS}]`);
         const res = await fetch(path);
         if (!res.ok) {
           if (idx === 0) throw new Error(`${path} が見つかりません。`);
@@ -281,11 +262,11 @@
         }
         const buf = await res.arrayBuffer();
         chunks.push(new Uint8Array(buf));
-        const currentPct = startPct + ((idx + 1) / maxCount) * (endPct - startPct);
-        updateProgress(currentPct);
-        log(`✓ 取得: ${path} (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+        updateProgress(((idx + 1) / MAX_CHUNKS) * 90);
+        log(`✓ 取得: model_part${idx}.bin (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
       }
 
+      setStatus("モデルバイナリを結合して ONNX セッションを初期化中...");
       const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
       const merged = new Uint8Array(totalLen);
       let offset = 0;
@@ -293,81 +274,86 @@
         merged.set(chunk, offset);
         offset += chunk.length;
       }
-      return merged;
+
+      vitsSession = await ort.InferenceSession.create(merged.buffer, {
+        executionProviders: ['wasm']
+      });
+      updateProgress(100);
+      setTimeout(() => progressContainer.style.display = "none", 400);
+      log("✅ VITS 音声モデルの初期化完了");
     }
 
-    // 3. G2P テキスト解析
-    const KANA_MAP = {
-      "あ":"a","い":"i","う":"u","え":"e","お":"o","か":"k a","き":"k i","く":"k u","け":"k e","こ":"k o",
-      "さ":"s a","し":"sh i","す":"s u","せ":"s e","そ":"s o","た":"t a","ち":"ch i","つ":"ts u","て":"t e","と":"t o",
-      "な":"n a","に":"n i","ぬ":"n u","ね":"n e","の":"n o","は":"h a","ひ":"h i","ふ":"f u","へ":"h e","ほ":"h o",
-      "ま":"m a","み":"m i","む":"m u","め":"m e","も":"m o","や":"y a","ゆ":"y u","よ":"y o",
-      "ら":"r a","り":"r i","る":"r u","れ":"r e","ろ":"r o","わ":"w a","を":"o","ん":"N",
-      "が":"g a","ぎ":"g i","ぐ":"g u","げ":"g e","ご":"g o","ざ":"z a","じ":"j i","ず":"z u","ぜ":"z e","ぞ":"z o",
-      "だ":"d a","ぢ":"j i","づ":"z u","で":"d e","ど":"d o","ば":"b a","び":"b i","ぶ":"b u","べ":"b e","ぼ":"b o",
-      "ぱ":"p a","ぴ":"p i","ぷ":"p u","ぺ":"p e","ぽ":"p o","きゃ":"ky a","きゅ":"ky u","きょ":"ky o",
-      "しゃ":"sh a","しゅ":"sh u","しょ":"sh o","ちゃ":"ch a","ちゅ":"ch u","ちょ":"ch o",
-      "にゃ":"ny a","にゅ":"ny u","にょ":"ny o","ひゃ":"hy a","ひゅ":"hy u","ひょ":"hy o",
-      "みゃ":"my a","みゅ":"my u","みょ":"my o","りゃ":"ry a","りゅ":"ry u","りょ":"ry o",
-      "ぎゃ":"gy a","ぎゅ":"gy u","ぎょ":"gy o","じゃ":"j a","じゅ":"j u","じょ":"j o",
-      "びゃ":"by a","びゅ":"by u","びょ":"by o","ぴゃ":"py a","ぴゅ":"py u","ぴょ":"py o",
-      "っ":"q","ー":"ー","、":",","。":".","！":"!","？":"?"," ":" "
+    // 3. テキスト -> 音素 (G2P) マッピングテーブル
+    const KANA_TO_PHONES = {
+      "あ":"a","い":"i","う":"u","え":"e","お":"o",
+      "か":"k a","き":"k i","く":"k u","け":"k e","こ":"k o",
+      "さ":"s a","し":"sh i","す":"s u","せ":"s e","そ":"s o",
+      "た":"t a","ち":"ch i","つ":"ts u","て":"t e","と":"t o",
+      "な":"n a","に":"n i","ぬ":"n u","ね":"n e","の":"n o",
+      "は":"h a","ひ":"h i","ふ":"f u","へ":"h e","ほ":"h o",
+      "ま":"m a","み":"m i","む":"m u","め":"m e","も":"m o",
+      "や":"y a","ゆ":"y u","よ":"y o",
+      "ら":"r a","り":"r i","る":"r u","れ":"r e","ろ":"r o",
+      "わ":"w a","を":"o","ん":"N",
+      "が":"g a","ぎ":"g i","ぐ":"g u","げ":"g e","ご":"g o",
+      "ざ":"z a","じ":"j i","ず":"z u","ぜ":"z e","ぞ":"z o",
+      "だ":"d a","ぢ":"j i","づ":"z u","で":"d e","ど":"d o",
+      "ば":"b a","び":"b i","ぶ":"b u","べ":"b e","ぼ":"b o",
+      "ぱ":"p a","ぴ":"p i","ぷ":"p u","ぺ":"p e","ぽ":"p o",
+      "きゃ":"ky a","きゅ":"ky u","きょ":"ky o",
+      "しゃ":"sh a","しゅ":"sh u","しょ":"sh o",
+      "ちゃ":"ch a","ちゅ":"ch u","ちょ":"ch o",
+      "にゃ":"ny a","にゅ":"ny u","にょ":"ny o",
+      "ひゃ":"hy a","ひゅ":"hy u","ひょ":"hy o",
+      "みゃ":"my a","みゅ":"my u","みょ":"my o",
+      "りゃ":"ry a","りゅ":"ry u","りょ":"ry o",
+      "ぎゃ":"gy a","ぎゅ":"gy u","ぎょ":"gy o",
+      "じゃ":"j a","じゅ":"j u","じょ":"j o",
+      "びゃ":"by a","びゅ":"by u","びょ":"by o",
+      "ぴゃ":"py a","ぴゅ":"py u","ぴょ":"py o",
+      "っ":"cl","ー":"ー","、":",","。":".","！":"!","？":"?"," ":"SP"
     };
 
-    function normalizeText(text) {
-      return text.replace(/[\u30a1-\u30f6]/g, m => String.fromCharCode(m.charCodeAt(0) - 0x60));
-    }
-
-    function processText(text) {
-      const normalized = normalizeText(text);
-      const phones = ["_"];
+    function textToPhones(text) {
+      // カタカナをひらがなに正規化
+      const hira = text.replace(/[\u30a1-\u30f6]/g, m => String.fromCharCode(m.charCodeAt(0) - 0x60));
+      const phones = ["_"]; // 先頭パディング
       const tones = [0];
-      const word2ph = [1];
-      const inputIds = [vocabMap ? (vocabMap.get("[CLS]") || 2) : 2];
 
       let i = 0;
-      while (i < normalized.length) {
-        let matchedKana = null;
-        let matchedPhones = null;
+      while (i < hira.length) {
+        let matched = null;
+        let pList = null;
 
-        if (i + 1 < normalized.length) {
-          const two = normalized.substring(i, i + 2);
-          if (KANA_MAP[two]) {
-            matchedKana = two;
-            matchedPhones = KANA_MAP[two].split(" ");
+        if (i + 1 < hira.length) {
+          const two = hira.substring(i, i + 2);
+          if (KANA_TO_PHONES[two]) {
+            matched = two;
+            pList = KANA_TO_PHONES[two].split(" ");
             i += 2;
           }
         }
 
-        if (!matchedKana) {
-          const one = normalized[i];
-          matchedKana = one;
-          matchedPhones = KANA_MAP[one] ? KANA_MAP[one].split(" ") : [one];
+        if (!matched) {
+          const one = hira[i];
+          matched = one;
+          pList = KANA_TO_PHONES[one] ? KANA_TO_PHONES[one].split(" ") : ["UNK"];
           i += 1;
         }
 
-        const rawChar = text[i - matchedKana.length] || matchedKana;
-        const tokenId = vocabMap ? (vocabMap.get(rawChar) || vocabMap.get(matchedKana) || vocabMap.get("[UNK]") || 1) : 1;
-        inputIds.push(tokenId);
-
-        let count = 0;
-        for (const p of matchedPhones) {
+        for (const p of pList) {
           phones.push(p);
           tones.push(0);
-          count++;
         }
-        word2ph.push(count);
       }
 
-      phones.push("_");
+      phones.push("_"); // 末尾パディング
       tones.push(0);
-      word2ph.push(1);
-      inputIds.push(vocabMap ? (vocabMap.get("[SEP]") || 3) : 3);
 
-      return { phones, tones, word2ph, inputIds };
+      return { phones, tones };
     }
 
-    // 4. 音声合成メイン関数（メモリ逐次実行 & グラフ最適化無効化）
+    // 4. 音声合成メイン関数
     async function synthesizeFromText() {
       const text = document.getElementById("inputText").value.trim();
       if (!text) {
@@ -389,109 +375,58 @@
       downloadBtn.disabled = true;
 
       try {
-        await loadDictionaries();
+        await initSymbols();
+        await loadVitsModel();
 
         const tStart = performance.now();
-        setStatus("テキスト解析中...");
-        const { phones, tones, word2ph, inputIds } = processText(text);
+        setStatus("テキストを音素に変換中...");
+        const { phones, tones } = textToPhones(text);
         const phoneLen = phones.length;
-        const phoneIds = phones.map(p => symbolToId.has(p) ? symbolToId.get(p) : 0);
+        const phoneIds = phones.map(p => symbolToId.has(p) ? symbolToId.get(p) : (symbolToId.get("UNK") || 0));
 
-        log(`音素数: ${phoneLen}, BERTトークン数: ${inputIds.length}`);
+        log(`音素列 (${phoneLen}): ${phones.join(" ")}`);
 
-        // --- STEP 1: BERT 特徴量抽出 ---
-        const bertBytes = await fetchDirectBinary("./models/bert_part", 6, "BERT モデル", 5, 45);
+        setStatus("VITS 音声モデルで波形を生成中...");
 
-        setStatus("BERT 特徴量を推論中 (ONNX)...");
-        log("・BERT セッションを初期化中 (メモリ節約モード)...");
+        // テンソル構築 (BERT特徴量は 1024次元のゼロテンソルで安定供給)
+        const HIDDEN_SIZE = 1024;
+        const zeroBert = new Float32Array(HIDDEN_SIZE * phoneLen);
 
-        // グラフ最適化を無効化して WASM メモリの爆発を防ぐ
-        const bertSession = await ort.InferenceSession.create(bertBytes, {
-          executionProviders: ['wasm'],
-          graphOptimizationLevel: 'disabled'
-        });
-
-        const seqLen = inputIds.length;
-        const bertFeeds = {
-          input_ids: new ort.Tensor("int64", new BigInt64Array(inputIds.map(v => BigInt(v))), [1, seqLen]),
-          attention_mask: new ort.Tensor("int64", new BigInt64Array(new Array(seqLen).fill(1n)), [1, seqLen]),
-          token_type_ids: new ort.Tensor("int64", new BigInt64Array(new Array(seqLen).fill(0n)), [1, seqLen])
-        };
-
-        const bertOut = await bertSession.run(bertFeeds);
-        const bertTensor = Object.values(bertOut)[0];
-        const hiddenSize = bertTensor.dims[2] || 1024;
-        const bertData = bertTensor.data;
-
-        // アライメント展開 [1, hiddenSize, phoneLen]
-        const alignedBert = new Float32Array(hiddenSize * phoneLen);
-        let phoneIdx = 0;
-        for (let w = 0; w < word2ph.length; w++) {
-          const reps = word2ph[w];
-          const srcOff = w * hiddenSize;
-          for (let r = 0; r < reps && phoneIdx < phoneLen; r++) {
-            for (let h = 0; h < hiddenSize; h++) {
-              alignedBert[h * phoneLen + phoneIdx] = bertData[srcOff + h];
-            }
-            phoneIdx++;
-          }
-        }
-
-        // BERT セッションおよび元バイナリのメモリ完全破棄
-        await bertSession.release();
-        log("✓ BERT 推論完了（メモリ解放済み）");
-
-        // --- STEP 2: VITS 音声波形生成 ---
-        const vitsBytes = await fetchDirectBinary("./models/model_part", 10, "VITS モデル", 50, 95);
-        
-        setStatus("VITS 音声モデルを初期化中...");
-        const vitsSession = await ort.InferenceSession.create(vitsBytes, {
-          executionProviders: ['wasm'],
-          graphOptimizationLevel: 'disabled'
-        });
-        log("✅ VITS セッションの初期化完了");
-
-        setStatus("VITS で音声波形を生成中...");
-        const vitsFeeds = {};
+        const feeds = {};
         for (const name of vitsSession.inputNames) {
           if (name === "x" || name === "x_tst") {
-            vitsFeeds[name] = new ort.Tensor("int64", new BigInt64Array(phoneIds.map(v => BigInt(v))), [1, phoneLen]);
+            feeds[name] = new ort.Tensor("int64", new BigInt64Array(phoneIds.map(v => BigInt(v))), [1, phoneLen]);
           } else if (name === "x_lengths" || name === "x_tst_lengths") {
-            vitsFeeds[name] = new ort.Tensor("int64", new BigInt64Array([BigInt(phoneLen)]), [1]);
+            feeds[name] = new ort.Tensor("int64", new BigInt64Array([BigInt(phoneLen)]), [1]);
           } else if (name === "sid" || name === "speakers" || name === "g") {
-            vitsFeeds[name] = new ort.Tensor("int64", new BigInt64Array([0n]), [1]);
+            feeds[name] = new ort.Tensor("int64", new BigInt64Array([0n]), [1]);
           } else if (name === "tone" || name === "tones") {
-            vitsFeeds[name] = new ort.Tensor("int64", new BigInt64Array(tones.map(v => BigInt(v))), [1, phoneLen]);
+            feeds[name] = new ort.Tensor("int64", new BigInt64Array(tones.map(v => BigInt(v))), [1, phoneLen]);
           } else if (name === "language") {
-            vitsFeeds[name] = new ort.Tensor("int64", new BigInt64Array(new Array(phoneLen).fill(0n)), [1, phoneLen]);
+            feeds[name] = new ort.Tensor("int64", new BigInt64Array(new Array(phoneLen).fill(0n)), [1, phoneLen]);
           } else if (name === "bert" || name === "ja_bert") {
-            vitsFeeds[name] = new ort.Tensor("float32", alignedBert, [1, hiddenSize, phoneLen]);
+            feeds[name] = new ort.Tensor("float32", zeroBert, [1, HIDDEN_SIZE, phoneLen]);
           } else if (name === "en_bert" || name === "zh_bert") {
-            vitsFeeds[name] = new ort.Tensor("float32", new Float32Array(hiddenSize * phoneLen), [1, hiddenSize, phoneLen]);
+            feeds[name] = new ort.Tensor("float32", zeroBert, [1, HIDDEN_SIZE, phoneLen]);
           } else if (name === "style_vec" || name === "style_vector") {
-            vitsFeeds[name] = new ort.Tensor("float32", new Float32Array(256), [1, 1, 256]);
+            feeds[name] = new ort.Tensor("float32", new Float32Array(256), [1, 1, 256]);
           } else if (name === "noise_scale") {
-            vitsFeeds[name] = new ort.Tensor("float32", new Float32Array([0.35]), [1]);
+            feeds[name] = new ort.Tensor("float32", new Float32Array([0.35]), [1]);
           } else if (name === "noise_scale_w") {
-            vitsFeeds[name] = new ort.Tensor("float32", new Float32Array([0.6]), [1]);
+            feeds[name] = new ort.Tensor("float32", new Float32Array([0.6]), [1]);
           } else if (name === "length_scale") {
-            vitsFeeds[name] = new ort.Tensor("float32", new Float32Array([1.0]), [1]);
+            feeds[name] = new ort.Tensor("float32", new Float32Array([1.0]), [1]);
           } else if (name === "sdp_ratio") {
-            vitsFeeds[name] = new ort.Tensor("float32", new Float32Array([0.0]), [1]);
+            feeds[name] = new ort.Tensor("float32", new Float32Array([0.0]), [1]);
           }
         }
 
-        const results = await vitsSession.run(vitsFeeds);
+        const results = await vitsSession.run(feeds);
         const outputName = vitsSession.outputNames[0];
-        const audioData = results[outputName].data;
-
-        await vitsSession.release();
+        const audioData = results[outputName].data; // Float32Array
 
         const totalSec = ((performance.now() - tStart) / 1000).toFixed(2);
-        log(`✓ 全工程完了: ${totalSec} 秒`);
-
-        updateProgress(100);
-        setTimeout(() => progressContainer.style.display = "none", 500);
+        log(`✓ 音声合成完了: ${totalSec} 秒`);
 
         // WAV 生成 & キャッシュ
         currentBlob = encodeWAV(audioData, SAMPLE_RATE);
