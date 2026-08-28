@@ -110,7 +110,7 @@
       font-family: Consolas, Monaco, monospace;
       font-size: 0.8rem;
       white-space: pre-wrap;
-      max-height: 160px;
+      max-height: 180px;
       overflow-y: auto;
       color: #94a3b8;
     }
@@ -149,7 +149,7 @@
   <div id="log">ログがここに表示されます...</div>
 
   <script type="module">
-    import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
+    import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client@latest/+esm";
 
     const SPACE_ID = "muraseryosuke/murase-voice-vits2";
 
@@ -173,14 +173,20 @@
       statusBox.textContent = msg;
     }
 
-    async function initClient() {
+    async function getClient() {
       if (!app) {
         setStatus("推論バックエンドに接続中...");
-        log(`Connecting to Hugging Face Space: ${SPACE_ID}...`);
+        log(`Connecting to Space: ${SPACE_ID}...`);
         app = await Client.connect(SPACE_ID);
         log("✅ バックエンドへの接続に成功しました。");
       }
+      return app;
     }
+
+    // 初期化をバックグラウンドで開始
+    getClient().catch(e => {
+      log("⚠️ 初期接続待機中: " + e.message);
+    });
 
     async function synthesize() {
       const text = document.getElementById("inputText").value.trim();
@@ -189,50 +195,63 @@
         return;
       }
 
+      // キャッシュ確認
       if (audioCache.has(text)) {
         log(`⚡ キャッシュから即座に再生: 「${text}」`);
         currentAudioUrl = audioCache.get(text);
         audioPlayer.src = currentAudioUrl;
         audioPlayer.play();
         downloadBtn.disabled = false;
-        setStatus("再生中 🔊 (キャッシュ)");
+        setStatus("再生中 🔊 (キャッシュ利用)");
         return;
       }
 
       playBtn.disabled = true;
       downloadBtn.disabled = true;
+      setStatus("推論リクエストを送信中...");
+      log(`▶ 音声合成リクエスト送信: 「${text}」`);
 
       try {
-        await initClient();
-
-        setStatus("音声を生成中 (ZeroGPU で推論中)...");
+        const client = await getClient();
+        setStatus("ZeroGPU で音声推論中（約1〜2秒）...");
         const tStart = performance.now();
 
-        // submit 経由でエンドポイント呼び出し
-        const submission = app.submit("/synthesize", [
+        // predict を使用して確実に結果を受信
+        const result = await client.predict("/synthesize", [
           text,
           0.35,
           0.6,
           0.0
         ]);
 
-        for await (const event of submission) {
-          if (event.type === "data") {
-            const totalSec = ((performance.now() - tStart) / 1000).toFixed(2);
-            log(`✓ 音声生成完了: ${totalSec} 秒`);
+        const totalSec = ((performance.now() - tStart) / 1000).toFixed(2);
+        log(`✓ 推論完了: ${totalSec} 秒`);
 
-            const audioItem = event.data[0];
-            currentAudioUrl = typeof audioItem === "string" ? audioItem : (audioItem.url || audioItem.path);
-
-            audioCache.set(text, currentAudioUrl);
-
-            audioPlayer.src = currentAudioUrl;
-            audioPlayer.play();
-            downloadBtn.disabled = false;
-            setStatus("再生中 🔊");
-            break;
+        // 返却データの URL 解決
+        let audioUrl = null;
+        if (result && result.data && result.data.length > 0) {
+          const item = result.data[0];
+          if (typeof item === "string") {
+            audioUrl = item;
+          } else if (item && item.url) {
+            audioUrl = item.url;
+          } else if (item && item.path) {
+            audioUrl = `https://muraseryosuke-murase-voice-vits2.hf.space/file=${item.path}`;
           }
         }
+
+        if (!audioUrl) {
+          throw new Error("音声データの取得に失敗しました。レスポンス: " + JSON.stringify(result));
+        }
+
+        currentAudioUrl = audioUrl;
+        audioCache.set(text, currentAudioUrl);
+
+        log(`✓ 音声ロード完了: ${currentAudioUrl}`);
+        audioPlayer.src = currentAudioUrl;
+        audioPlayer.play();
+        downloadBtn.disabled = false;
+        setStatus("再生中 🔊");
       } catch (err) {
         setStatus("エラーが発生しました");
         log("❌ " + (err.message || String(err)));
@@ -250,7 +269,7 @@
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      log("💾 音声ファイルをダウンロードしました。");
+      log("💾 音声ファイルを保存しました。");
     }
 
     playBtn.addEventListener("click", synthesize);
