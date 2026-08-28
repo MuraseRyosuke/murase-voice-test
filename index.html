@@ -19,6 +19,7 @@
       font-size: 1.5rem;
       border-bottom: 2px solid #eaeaea;
       padding-bottom: 10px;
+      margin-bottom: 16px;
     }
     .notice {
       background-color: #fffbeb;
@@ -27,24 +28,26 @@
       margin: 16px 0;
       font-size: 0.9rem;
       color: #92400e;
+      border-radius: 0 4px 4px 0;
     }
     .notice ul {
       margin: 6px 0 0 0;
       padding-left: 20px;
     }
     .form-group {
-      margin: 16px 0;
+      margin: 18px 0;
     }
     label {
       display: block;
       font-weight: 600;
       margin-bottom: 6px;
       font-size: 0.9rem;
+      color: #1e293b;
     }
     select, textarea {
       width: 100%;
       box-sizing: border-box;
-      padding: 10px;
+      padding: 10px 12px;
       border-radius: 6px;
       border: 1px solid #cbd5e1;
       font-size: 0.95rem;
@@ -53,24 +56,38 @@
     }
     textarea {
       resize: vertical;
-      min-height: 70px;
+      min-height: 60px;
+      background-color: #f8fafc;
+    }
+    .player-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 20px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    audio {
+      width: 100%;
+      height: 40px;
     }
     .button-group {
       display: flex;
       gap: 10px;
-      margin: 20px 0;
       flex-wrap: wrap;
     }
     button {
       background-color: #2563eb;
       color: white;
       border: none;
-      padding: 10px 18px;
+      padding: 10px 20px;
       font-size: 0.95rem;
       border-radius: 6px;
       cursor: pointer;
       font-weight: 500;
-      transition: background-color 0.2s;
+      transition: all 0.2s;
     }
     button:hover:not(:disabled) {
       background-color: #1d4ed8;
@@ -79,43 +96,28 @@
       background-color: #93c5fd;
       cursor: not-allowed;
     }
-    button.secondary {
-      background-color: #475569;
-    }
-    button.secondary:hover:not(:disabled) {
-      background-color: #334155;
-    }
     button.success {
       background-color: #059669;
     }
     button.success:hover:not(:disabled) {
       background-color: #047857;
     }
-    .cache-badge {
-      display: inline-block;
-      font-size: 0.75rem;
-      padding: 2px 8px;
-      border-radius: 4px;
-      background: #e2e8f0;
-      color: #475569;
-      margin-left: 8px;
-    }
     #status {
-      margin: 15px 0;
+      margin: 12px 0;
       font-weight: 600;
       color: #1e293b;
     }
     #log {
-      background: #f1f5f9;
-      border: 1px solid #cbd5e1;
+      background: #0f172a;
+      border: 1px solid #334155;
       padding: 12px;
       border-radius: 6px;
       font-family: Consolas, Monaco, monospace;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
       white-space: pre-wrap;
-      max-height: 200px;
+      max-height: 180px;
       overflow-y: auto;
-      color: #334155;
+      color: #94a3b8;
     }
   </style>
 </head>
@@ -127,28 +129,34 @@
     <strong>【ご利用上の注意・前提事項】</strong>
     <ul>
       <li>ブラウザ上で直接モデル推論を行うため、初回ロードと初回生成に数十秒〜数分かかる場合があります。</li>
-      <li>一度生成した音声はブラウザ内にキャッシュされ、次回以降は推論なしで即座に再生されます。</li>
-      <li>スマートフォン等の低スペック環境ではメモリ不足によりクラッシュする可能性があります。PC環境での実行を推奨します。</li>
+      <li>一度生成した音声はキャッシュされ、プレイヤーのシークバーや再生ボタンで自由に操作・リプレイできます。</li>
+      <li>事前抽出されたテンソルデータ（プリセット）を選択して音声合成を実行します。</li>
     </ul>
   </div>
 
   <div class="form-group">
-    <label for="presetSelect">プリセット文章の選択:</label>
+    <label for="presetSelect">発話プリセットの選択:</label>
     <select id="presetSelect" onchange="onSelectPreset()">
-      <option value="exact_input.json">こんにちは。村瀬亮介の音声テストプレイヤーへようこそ。ブラウザ上で動作しています。</option>
-      <option value="test_input.json">テスト音声データ (test_input.json)</option>
+      <option value="exact_input.json" data-text="こんにちは。村瀬亮介の音声テストプレイヤーへようこそ。ブラウザ上で動作しています。">こんにちは。村瀬亮介の音声テストプレイヤーへようこそ。ブラウザ上で動作しています。</option>
+      <option value="test_input.json" data-text="テスト音声データ (test_input.json)">テスト音声データ (test_input.json)</option>
     </select>
   </div>
 
   <div class="form-group">
-    <label for="inputText">発話テキスト:</label>
-    <textarea id="inputText">こんにちは。村瀬亮介の音声テストプレイヤーへようこそ。ブラウザ上で動作しています。</textarea>
+    <label for="inputText">選択中の発話テキスト:</label>
+    <textarea id="inputText" readonly>こんにちは。村瀬亮介の音声テストプレイヤーへようこそ。ブラウザ上で動作しています。</textarea>
   </div>
 
   <div class="button-group">
-    <button id="playBtn" onclick="synthesizeOrPlay()">音声を合成・再生</button>
-    <button id="replayBtn" class="secondary" onclick="replayAudio()" disabled>もう一度再生</button>
-    <button id="downloadBtn" class="success" onclick="downloadWav()" disabled>WAVをダウンロード</button>
+    <button id="playBtn" onclick="synthesize()">音声を合成して読み込む</button>
+  </div>
+
+  <div class="player-card">
+    <label>🔊 音声プレイヤー（一時停止・シーク・音量調整）:</label>
+    <audio id="audioPlayer" controls></audio>
+    <div>
+      <button id="downloadBtn" class="success" onclick="downloadWav()" disabled>WAVを保存</button>
+    </div>
   </div>
 
   <div id="status">待機中</div>
@@ -159,10 +167,13 @@
     ort.env.wasm.simd = true;
 
     let session = null;
-    let audioCtx = null;
-    let currentAudioData = null; // 現在再生中の Float32Array
-    const audioCache = new Map(); // テキスト・プリセットごとの音声キャッシュ
+    let currentBlob = null;
+    const audioCache = new Map(); // プリセットごとのWAV Blobキャッシュ
     const SAMPLE_RATE = 44100;
+
+    const audioPlayer = document.getElementById("audioPlayer");
+    const downloadBtn = document.getElementById("downloadBtn");
+    const playBtn = document.getElementById("playBtn");
 
     function log(msg) {
       console.log(msg);
@@ -175,42 +186,63 @@
       document.getElementById("status").textContent = msg;
     }
 
-    // 起動時に models/presets.json があれば読み込んでセレクトボックスを拡張
+    // 起動時に models/presets.json を安全にパース
     window.addEventListener("DOMContentLoaded", async () => {
       try {
-        const res = await fetch("./models/presets.json");
+        const res = await fetch("./models/presets.json?t=" + Date.now());
         if (res.ok) {
-          const presets = await res.json();
+          const data = await res.json();
           const select = document.getElementById("presetSelect");
-          select.innerHTML = "";
           
-          presets.forEach((p, idx) => {
-            const opt = document.createElement("option");
-            opt.value = p.file || p.json || (idx === 0 ? "exact_input.json" : `preset_${idx}.json`);
-            opt.textContent = p.text || p.title || `プリセット ${idx + 1}`;
-            opt.dataset.text = p.text || opt.textContent;
-            select.appendChild(opt);
-          });
-          onSelectPreset();
-          log("✓ プリセットリスト (models/presets.json) を読み込みました。");
+          let items = [];
+          if (Array.isArray(data)) {
+            items = data;
+          } else if (typeof data === "object" && data !== null) {
+            items = Object.keys(data).map(k => ({
+              file: k.endsWith(".json") ? k : `${k}.json`,
+              text: typeof data[k] === "string" ? data[k] : (data[k].text || k)
+            }));
+          }
+
+          if (items.length > 0) {
+            select.innerHTML = "";
+            items.forEach((p, idx) => {
+              const opt = document.createElement("option");
+              opt.value = p.file || p.json || (idx === 0 ? "exact_input.json" : `preset_${idx}.json`);
+              const textContent = p.text || p.title || `プリセット ${idx + 1}`;
+              opt.textContent = textContent;
+              opt.dataset.text = textContent;
+              select.appendChild(opt);
+            });
+            onSelectPreset();
+            log("✓ models/presets.json からプリセットを展開しました。");
+          }
         }
       } catch (e) {
-        // presets.json がない場合は初期HTMLの option を維持
+        log("※ デフォルトのプリセット定義を使用します。");
       }
     });
 
     function onSelectPreset() {
       const select = document.getElementById("presetSelect");
       const selectedOpt = select.options[select.selectedIndex];
+      if (!selectedOpt) return;
+
       const text = selectedOpt.dataset.text || selectedOpt.textContent;
       document.getElementById("inputText").value = text;
       
-      // 選択したテキストが既にキャッシュされていればボタン状態を更新
-      if (audioCache.has(text)) {
-        document.getElementById("replayBtn").disabled = false;
-        document.getElementById("downloadBtn").disabled = false;
-        setStatus("キャッシュ済み音声が選択されています（即座に再生可能）");
+      const jsonFile = selectedOpt.value;
+      if (audioCache.has(jsonFile)) {
+        setPlayerSource(audioCache.get(jsonFile));
+        setStatus("生成済みの音声がプレイヤーに読み込まれました（即座に再生可能）");
       }
+    }
+
+    function setPlayerSource(blob) {
+      currentBlob = blob;
+      const url = URL.createObjectURL(blob);
+      audioPlayer.src = url;
+      downloadBtn.disabled = false;
     }
 
     // 分割モデルの自動結合ロード
@@ -253,37 +285,29 @@
       log("✅ モデルのロードが完了しました。");
     }
 
-    // 音声合成またはキャッシュからの即座再生
-    async function synthesizeOrPlay() {
-      const text = document.getElementById("inputText").value.trim();
-      const btn = document.getElementById("playBtn");
-      const replayBtn = document.getElementById("replayBtn");
-      const dlBtn = document.getElementById("downloadBtn");
+    // 音声合成処理
+    async function synthesize() {
+      const select = document.getElementById("presetSelect");
+      const jsonFile = select.value || "exact_input.json";
 
-      // 1. すでに生成済み（キャッシュあり）の場合は推論をスキップして即再生
-      if (audioCache.has(text)) {
-        log(`⚡ キャッシュから音声を即時再生: 「${text.substring(0, 15)}...」`);
-        currentAudioData = audioCache.get(text);
-        playBuffer(currentAudioData);
-        replayBtn.disabled = false;
-        dlBtn.disabled = false;
+      // キャッシュがある場合は即座に再生
+      if (audioCache.has(jsonFile)) {
+        log(`⚡ キャッシュからプレイヤーへセット: ${jsonFile}`);
+        setPlayerSource(audioCache.get(jsonFile));
+        audioPlayer.play();
+        setStatus("再生中 🔊");
         return;
       }
 
-      // 2. 未キャッシュの場合は ONNX 推論を実行
-      btn.disabled = true;
-      replayBtn.disabled = true;
-      dlBtn.disabled = true;
+      playBtn.disabled = true;
+      downloadBtn.disabled = true;
 
       try {
         if (!session) {
           await loadModel();
         }
 
-        const select = document.getElementById("presetSelect");
-        const jsonFile = select.value || "exact_input.json";
-        
-        setStatus(`入力テンソル (${jsonFile}) を読み込み中...`);
+        setStatus(`入力データ (${jsonFile}) を読み込み中...`);
         const res = await fetch(`./${jsonFile}?t=` + Date.now());
         if (!res.ok) throw new Error(`${jsonFile} が見つかりません。`);
         const payload = await res.json();
@@ -326,60 +350,31 @@
         log(`推論完了: ${tInfer} 秒`);
 
         const outputName = session.outputNames[0];
-        currentAudioData = results[outputName].data;
+        const audioData = results[outputName].data; // Float32Array
 
-        // キャッシュに保存
-        audioCache.set(text, currentAudioData);
+        // WAV Blob に変換してキャッシュ & プレイヤーにセット
+        const wavBlob = encodeWAV(audioData, SAMPLE_RATE);
+        audioCache.set(jsonFile, wavBlob);
+        setPlayerSource(wavBlob);
 
-        // 再生
-        playBuffer(currentAudioData);
+        // 自動再生
+        audioPlayer.play();
 
-        replayBtn.disabled = false;
-        dlBtn.disabled = false;
+        setStatus("再生中 🔊");
+        log("✅ 音声をプレイヤーに読み込みました。");
       } catch (err) {
         setStatus("エラーが発生しました");
         log("❌ " + err.message);
         console.error(err);
       } finally {
-        btn.disabled = false;
-      }
-    }
-
-    // Web Audio API による即座再生
-    async function playBuffer(audioData) {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
-      }
-      if (audioCtx.state === "suspended") {
-        await audioCtx.resume();
-      }
-
-      const audioBuffer = audioCtx.createBuffer(1, audioData.length, SAMPLE_RATE);
-      audioBuffer.copyToChannel(audioData, 0);
-
-      const source = audioCtx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioCtx.destination);
-      source.start();
-
-      setStatus("再生中 🔊");
-      log("✅ 音声を再生しました。");
-    }
-
-    // もう一度再生（リプレイ）
-    function replayAudio() {
-      if (currentAudioData) {
-        log("🔁 音声を再再生中...");
-        playBuffer(currentAudioData);
+        playBtn.disabled = false;
       }
     }
 
     // WAV ダウンロード
     function downloadWav() {
-      if (!currentAudioData) return;
-
-      const wavBlob = encodeWAV(currentAudioData, SAMPLE_RATE);
-      const url = URL.createObjectURL(wavBlob);
+      if (!currentBlob) return;
+      const url = URL.createObjectURL(currentBlob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `voice_${Date.now()}.wav`;
@@ -387,9 +382,10 @@
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      log("💾 WAVファイルをダウンロードしました。");
+      log("💾 WAVファイルを保存しました。");
     }
 
+    // Float32Array -> 16-bit PCM WAV Blob 変換
     function encodeWAV(samples, sampleRate) {
       const buffer = new ArrayBuffer(44 + samples.length * 2);
       const view = new DataView(buffer);
