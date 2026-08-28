@@ -134,27 +134,25 @@
   </div>
 
   <div class="button-group">
-    <button id="playBtn">音声を合成して再生</button>
+    <button id="playBtn" onclick="synthesize()">音声を合成して再生</button>
   </div>
 
   <div class="player-card">
     <label>🔊 音声コントロール:</label>
     <audio id="audioPlayer" controls></audio>
     <div>
-      <button id="downloadBtn" class="success" disabled>WAVを保存</button>
+      <button id="downloadBtn" class="success" onclick="downloadAudio()" disabled>WAVを保存</button>
     </div>
   </div>
 
   <div id="status">待機中</div>
   <div id="log">ログがここに表示されます...</div>
 
-  <script type="module">
-    import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client@latest/+esm";
+  <script>
+    // 直接 Spaces の API エンドポイントを指定
+    const API_URL = "https://muraseryosuke-murase-voice-vits2.hf.space/api/tts";
 
-    const SPACE_ID = "muraseryosuke/murase-voice-vits2";
-
-    let app = null;
-    let currentAudioUrl = null;
+    let currentBlob = null;
     const audioCache = new Map();
 
     const audioPlayer = document.getElementById("audioPlayer");
@@ -173,15 +171,6 @@
       statusBox.textContent = msg;
     }
 
-    async function initClient() {
-      if (!app) {
-        setStatus("推論バックエンドに接続中...");
-        log(`Connecting to Hugging Face Space: ${SPACE_ID}...`);
-        app = await Client.connect(SPACE_ID);
-        log("✅ バックエンドへの接続に成功しました。");
-      }
-    }
-
     async function synthesize() {
       const text = document.getElementById("inputText").value.trim();
       if (!text) {
@@ -189,10 +178,11 @@
         return;
       }
 
+      // キャッシュ判定
       if (audioCache.has(text)) {
         log(`⚡ キャッシュから即座に再生: 「${text}」`);
-        currentAudioUrl = audioCache.get(text);
-        audioPlayer.src = currentAudioUrl;
+        currentBlob = audioCache.get(text);
+        audioPlayer.src = URL.createObjectURL(currentBlob);
         audioPlayer.play();
         downloadBtn.disabled = false;
         setStatus("再生中 🔊 (キャッシュ)");
@@ -203,34 +193,42 @@
       downloadBtn.disabled = true;
 
       try {
-        await initClient();
-
-        setStatus("音声を生成中 (ZeroGPU で推論中)...");
+        setStatus("推論リクエストを送信中 (ZeroGPU で合成中)...");
+        log(`API リクエスト送信: ${API_URL}`);
         const tStart = performance.now();
 
-        // 明示的なエンドポイント /synthesize を呼び出し
-        const result = await app.predict("/synthesize", [
-          text,
-          0.35,
-          0.6,
-          0.0
-        ]);
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            text: text,
+            noise_scale: 0.35,
+            noise_scale_w: 0.6,
+            sdp_ratio: 0.0
+          })
+        });
 
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`API エラー (${res.status}): ${errText}`);
+        }
+
+        // WAV バイナリを直接 Blob として取得
+        currentBlob = await res.blob();
         const totalSec = ((performance.now() - tStart) / 1000).toFixed(2);
-        log(`✓ 音声生成完了: ${totalSec} 秒`);
+        log(`✓ 音声生成完了: ${totalSec} 秒 (${(currentBlob.size / 1024).toFixed(1)} KB)`);
 
-        const audioItem = result.data[0];
-        currentAudioUrl = typeof audioItem === "string" ? audioItem : (audioItem.url || audioItem.path);
+        audioCache.set(text, currentBlob);
 
-        audioCache.set(text, currentAudioUrl);
-
-        audioPlayer.src = currentAudioUrl;
+        audioPlayer.src = URL.createObjectURL(currentBlob);
         audioPlayer.play();
         downloadBtn.disabled = false;
         setStatus("再生中 🔊");
       } catch (err) {
         setStatus("エラーが発生しました");
-        log("❌ " + (err.message || String(err)));
+        log("❌ " + err.message);
         console.error(err);
       } finally {
         playBtn.disabled = false;
@@ -238,18 +236,17 @@
     }
 
     function downloadAudio() {
-      if (!currentAudioUrl) return;
+      if (!currentBlob) return;
+      const url = URL.createObjectURL(currentBlob);
       const a = document.createElement("a");
-      a.href = currentAudioUrl;
+      a.href = url;
       a.download = `voice_${Date.now()}.wav`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      URL.revokeObjectURL(url);
       log("💾 音声ファイルをダウンロードしました。");
     }
-
-    playBtn.addEventListener("click", synthesize);
-    downloadBtn.addEventListener("click", downloadAudio);
   </script>
 </body>
 </html>
