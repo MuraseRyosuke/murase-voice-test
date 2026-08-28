@@ -3,13 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Style-BERT-VITS2 完全ブラウザ音声合成プレイヤー</title>
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/ort.all.min.js"></script>
+  <title>Style-BERT-VITS2 音声合成プレイヤー</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      max-width: 740px;
-      margin: 30px auto;
+      max-width: 720px;
+      margin: 40px auto;
       padding: 0 20px;
       line-height: 1.6;
       color: #1e293b;
@@ -18,17 +17,17 @@
     h1 {
       font-size: 1.5rem;
       border-bottom: 2px solid #e2e8f0;
-      padding-bottom: 8px;
-      margin-bottom: 12px;
+      padding-bottom: 10px;
+      margin-bottom: 16px;
     }
     .notice {
       background-color: #eff6ff;
       border-left: 4px solid #3b82f6;
       padding: 12px 16px;
       margin-bottom: 16px;
-      font-size: 0.88rem;
+      font-size: 0.9rem;
       color: #1e40af;
-      border-radius: 0 6px 6px 0;
+      border-radius: 0 4px 4px 0;
     }
     .notice ul {
       margin: 4px 0 0;
@@ -55,21 +54,6 @@
       resize: vertical;
       min-height: 80px;
     }
-    .progress-bar-container {
-      width: 100%;
-      background: #e2e8f0;
-      border-radius: 9999px;
-      height: 10px;
-      overflow: hidden;
-      margin: 12px 0;
-      display: none;
-    }
-    .progress-bar {
-      width: 0%;
-      height: 100%;
-      background: #3b82f6;
-      transition: width 0.15s ease;
-    }
     .player-card {
       background: #fff;
       border: 1px solid #e2e8f0;
@@ -79,7 +63,6 @@
       display: flex;
       flex-direction: column;
       gap: 12px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     audio {
       width: 100%;
@@ -127,7 +110,7 @@
       font-family: Consolas, Monaco, monospace;
       font-size: 0.8rem;
       white-space: pre-wrap;
-      max-height: 180px;
+      max-height: 160px;
       overflow-y: auto;
       color: #94a3b8;
     }
@@ -135,66 +118,52 @@
 </head>
 <body>
 
-  <h1>Style-BERT-VITS2 完全ブラウザ音声合成プレイヤー</h1>
+  <h1>Style-BERT-VITS2 音声合成プレイヤー</h1>
 
   <div class="notice">
-    <strong>【動作仕様およびダウンロード容量】</strong>
+    <strong>【ご利用上の案内】</strong>
     <ul>
-      <li>ブラウザ上で直接音声推論を行うため、初回実行時に <strong>VITS音声合成モデル（約189.4MB）</strong> をダウンロードして結合します。</li>
-      <li>入力されたテキスト（ひらがな・カタカナ推奨）を音素に変換し、ブラウザ単体で音声を合成します。</li>
-      <li>一度生成した音声はキャッシュされ、プレイヤーのシークバー・再生・WAV保存が即座に行えます。</li>
+      <li>クラウドAPI（Hugging Face Spaces）と連携し、漢字混じりの自由な文章を高音質で合成します。</li>
+      <li>一度生成した音声はキャッシュされ、プレイヤーで再生・一時停止・シーク・WAV保存が自由に行えます。</li>
     </ul>
   </div>
 
   <div class="form-group">
-    <label for="inputText">発話テキスト（自由に入力可能・ひらがな/カタカナ推奨）:</label>
-    <textarea id="inputText" placeholder="喋らせたいテキストを入力してください...">こんにちは。むらせりょうすけのおんせいてすとぷれいやーへようこそ。ぶらうざじょうでどうさしています。</textarea>
-  </div>
-
-  <div class="progress-bar-container" id="progressContainer">
-    <div class="progress-bar" id="progressBar"></div>
+    <label for="inputText">発話テキスト（漢字・ひらがな・カタカナ対応）:</label>
+    <textarea id="inputText" placeholder="喋らせたいテキストを入力してください...">こんにちは。村瀬亮介の音声合成プレイヤーへようこそ。自由なテキストを滑らかに発話できます。</textarea>
   </div>
 
   <div class="button-group">
-    <button id="playBtn" onclick="synthesizeFromText()">テキストから音声を合成</button>
+    <button id="playBtn">音声を合成して再生</button>
   </div>
 
   <div class="player-card">
-    <label>🔊 音声プレイヤー（再生・一時停止・シークバー・音量）:</label>
+    <label>🔊 音声コントロール:</label>
     <audio id="audioPlayer" controls></audio>
     <div>
-      <button id="downloadBtn" class="success" onclick="downloadWav()" disabled>WAVを保存</button>
+      <a id="downloadLink" style="display:none;"></a>
+      <button id="downloadBtn" class="success" disabled>WAVを保存</button>
     </div>
   </div>
 
   <div id="status">待機中</div>
   <div id="log">ログがここに表示されます...</div>
 
-  <script>
-    ort.env.wasm.numThreads = 1;
-    ort.env.wasm.simd = true;
+  <script type="module">
+    import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
 
-    const SAMPLE_RATE = 44100;
-    let vitsSession = null;
-    let symbolToId = null;
-    let currentBlob = null;
+    // ⚠️ あなたの Hugging Face Space の名前に書き換えてください
+    const SPACE_ID = "muraseryosuke/murase-voice-vits2";
+
+    let app = null;
+    let currentAudioUrl = null;
     const audioCache = new Map();
-
-    // Style-BERT-VITS2 公式完全音素シンボルセット（130種）
-    const OFFICIAL_SYMBOLS = [
-      "_", ",", ".", "!", "?", "-", "A", "I", "U", "E", "O", "a", "b", "by", "ch", "cl",
-      "d", "dy", "e", "f", "g", "gy", "h", "hy", "i", "j", "k", "ky", "m", "my", "n", "ny",
-      "N", "o", "p", "py", "r", "ry", "s", "sh", "t", "ts", "u", "v", "w", "y", "z", "q",
-      "ー", "SP", "UNK"
-    ];
 
     const audioPlayer = document.getElementById("audioPlayer");
     const downloadBtn = document.getElementById("downloadBtn");
     const playBtn = document.getElementById("playBtn");
     const logBox = document.getElementById("log");
     const statusBox = document.getElementById("status");
-    const progressBar = document.getElementById("progressBar");
-    const progressContainer = document.getElementById("progressContainer");
 
     function log(msg) {
       console.log(msg);
@@ -206,168 +175,30 @@
       statusBox.textContent = msg;
     }
 
-    function updateProgress(percent) {
-      progressContainer.style.display = "block";
-      progressBar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+    async function initClient() {
+      if (!app) {
+        setStatus("推論バックエンドに接続中...");
+        log(`Connecting to Hugging Face Space: ${SPACE_ID}...`);
+        app = await Client.connect(SPACE_ID);
+        log("✅ バックエンドへの接続に成功しました。");
+      }
     }
 
-    // 1. 音素辞書の初期化
-    async function initSymbols() {
-      if (symbolToId && symbolToId.size > 0) return;
-
-      symbolToId = new Map();
-      try {
-        const res = await fetch("./models/symbols.json");
-        if (res.ok) {
-          const raw = await res.json();
-          let list = [];
-          if (Array.isArray(raw)) list = raw;
-          else if (raw.symbols && Array.isArray(raw.symbols)) list = raw.symbols;
-          else if (typeof raw === "object") {
-            const entries = Object.entries(raw);
-            if (entries.length > 0 && typeof entries[0][1] === "number") {
-              entries.forEach(([k, v]) => symbolToId.set(k, v));
-            } else {
-              list = Object.values(raw);
-            }
-          }
-          if (list.length > 0) {
-            list.forEach((s, idx) => symbolToId.set(s, idx));
-          }
-        }
-      } catch (e) {}
-
-      if (symbolToId.size === 0) {
-        OFFICIAL_SYMBOLS.forEach((s, idx) => symbolToId.set(s, idx));
-        log("ℹ️ 公式フォールバック音素シンボルをロードしました。");
-      }
-      log(`✓ 音素辞書ロード完了 (シンボル数: ${symbolToId.size})`);
-    }
-
-    // 2. VITS モデルバイナリの取得と結合
-    async function loadVitsModel() {
-      if (vitsSession) return;
-
-      setStatus("VITS 音声モデル (約189.4MB) をダウンロード中...");
-      const chunks = [];
-      const MAX_CHUNKS = 10;
-
-      for (let idx = 0; idx < MAX_CHUNKS; idx++) {
-        const path = `./models/model_part${idx}.bin`;
-        setStatus(`VITS モデルを取得中... [${idx + 1}/${MAX_CHUNKS}]`);
-        const res = await fetch(path);
-        if (!res.ok) {
-          if (idx === 0) throw new Error(`${path} が見つかりません。`);
-          break;
-        }
-        const buf = await res.arrayBuffer();
-        chunks.push(new Uint8Array(buf));
-        updateProgress(((idx + 1) / MAX_CHUNKS) * 90);
-        log(`✓ 取得: model_part${idx}.bin (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
-      }
-
-      setStatus("モデルバイナリを結合して ONNX セッションを初期化中...");
-      const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
-      const merged = new Uint8Array(totalLen);
-      let offset = 0;
-      for (const chunk of chunks) {
-        merged.set(chunk, offset);
-        offset += chunk.length;
-      }
-
-      vitsSession = await ort.InferenceSession.create(merged.buffer, {
-        executionProviders: ['wasm']
-      });
-      updateProgress(100);
-      setTimeout(() => progressContainer.style.display = "none", 400);
-      log("✅ VITS 音声モデルの初期化完了");
-    }
-
-    // 3. テキスト -> 音素 (G2P) マッピングテーブル
-    const KANA_TO_PHONES = {
-      "あ":"a","い":"i","う":"u","え":"e","お":"o",
-      "か":"k a","き":"k i","く":"k u","け":"k e","こ":"k o",
-      "さ":"s a","し":"sh i","す":"s u","せ":"s e","そ":"s o",
-      "た":"t a","ち":"ch i","つ":"ts u","て":"t e","と":"t o",
-      "な":"n a","に":"n i","ぬ":"n u","ね":"n e","の":"n o",
-      "は":"h a","ひ":"h i","ふ":"f u","へ":"h e","ほ":"h o",
-      "ま":"m a","み":"m i","む":"m u","め":"m e","も":"m o",
-      "や":"y a","ゆ":"y u","よ":"y o",
-      "ら":"r a","り":"r i","る":"r u","れ":"r e","ろ":"r o",
-      "わ":"w a","を":"o","ん":"N",
-      "が":"g a","ぎ":"g i","ぐ":"g u","げ":"g e","ご":"g o",
-      "ざ":"z a","じ":"j i","ず":"z u","ぜ":"z e","ぞ":"z o",
-      "だ":"d a","ぢ":"j i","づ":"z u","で":"d e","ど":"d o",
-      "ば":"b a","び":"b i","ぶ":"b u","べ":"b e","ぼ":"b o",
-      "ぱ":"p a","ぴ":"p i","ぷ":"p u","ぺ":"p e","ぽ":"p o",
-      "きゃ":"ky a","きゅ":"ky u","きょ":"ky o",
-      "しゃ":"sh a","しゅ":"sh u","しょ":"sh o",
-      "ちゃ":"ch a","ちゅ":"ch u","ちょ":"ch o",
-      "にゃ":"ny a","にゅ":"ny u","にょ":"ny o",
-      "ひゃ":"hy a","ひゅ":"hy u","ひょ":"hy o",
-      "みゃ":"my a","みゅ":"my u","みょ":"my o",
-      "りゃ":"ry a","りゅ":"ry u","りょ":"ry o",
-      "ぎゃ":"gy a","ぎゅ":"gy u","ぎょ":"gy o",
-      "じゃ":"j a","じゅ":"j u","じょ":"j o",
-      "びゃ":"by a","びゅ":"by u","びょ":"by o",
-      "ぴゃ":"py a","ぴゅ":"py u","ぴょ":"py o",
-      "っ":"cl","ー":"ー","、":",","。":".","！":"!","？":"?"," ":"SP"
-    };
-
-    function textToPhones(text) {
-      // カタカナをひらがなに正規化
-      const hira = text.replace(/[\u30a1-\u30f6]/g, m => String.fromCharCode(m.charCodeAt(0) - 0x60));
-      const phones = ["_"]; // 先頭パディング
-      const tones = [0];
-
-      let i = 0;
-      while (i < hira.length) {
-        let matched = null;
-        let pList = null;
-
-        if (i + 1 < hira.length) {
-          const two = hira.substring(i, i + 2);
-          if (KANA_TO_PHONES[two]) {
-            matched = two;
-            pList = KANA_TO_PHONES[two].split(" ");
-            i += 2;
-          }
-        }
-
-        if (!matched) {
-          const one = hira[i];
-          matched = one;
-          pList = KANA_TO_PHONES[one] ? KANA_TO_PHONES[one].split(" ") : ["UNK"];
-          i += 1;
-        }
-
-        for (const p of pList) {
-          phones.push(p);
-          tones.push(0);
-        }
-      }
-
-      phones.push("_"); // 末尾パディング
-      tones.push(0);
-
-      return { phones, tones };
-    }
-
-    // 4. 音声合成メイン関数
-    async function synthesizeFromText() {
+    async function synthesize() {
       const text = document.getElementById("inputText").value.trim();
       if (!text) {
         alert("テキストを入力してください。");
         return;
       }
 
+      // キャッシュ確認
       if (audioCache.has(text)) {
-        log(`⚡ キャッシュから即時再生: 「${text}」`);
-        currentBlob = audioCache.get(text);
-        audioPlayer.src = URL.createObjectURL(currentBlob);
+        log(`⚡ キャッシュから即座に再生: 「${text}」`);
+        currentAudioUrl = audioCache.get(text);
+        audioPlayer.src = currentAudioUrl;
         audioPlayer.play();
         downloadBtn.disabled = false;
-        setStatus("再生中 🔊 (キャッシュ利用)");
+        setStatus("再生中 🔊 (キャッシュ)");
         return;
       }
 
@@ -375,64 +206,28 @@
       downloadBtn.disabled = true;
 
       try {
-        await initSymbols();
-        await loadVitsModel();
+        await initClient();
 
+        setStatus("音声を生成中 (BERT + VITS 推論)...");
         const tStart = performance.now();
-        setStatus("テキストを音素に変換中...");
-        const { phones, tones } = textToPhones(text);
-        const phoneLen = phones.length;
-        const phoneIds = phones.map(p => symbolToId.has(p) ? symbolToId.get(p) : (symbolToId.get("UNK") || 0));
 
-        log(`音素列 (${phoneLen}): ${phones.join(" ")}`);
-
-        setStatus("VITS 音声モデルで波形を生成中...");
-
-        // テンソル構築 (BERT特徴量は 1024次元のゼロテンソルで安定供給)
-        const HIDDEN_SIZE = 1024;
-        const zeroBert = new Float32Array(HIDDEN_SIZE * phoneLen);
-
-        const feeds = {};
-        for (const name of vitsSession.inputNames) {
-          if (name === "x" || name === "x_tst") {
-            feeds[name] = new ort.Tensor("int64", new BigInt64Array(phoneIds.map(v => BigInt(v))), [1, phoneLen]);
-          } else if (name === "x_lengths" || name === "x_tst_lengths") {
-            feeds[name] = new ort.Tensor("int64", new BigInt64Array([BigInt(phoneLen)]), [1]);
-          } else if (name === "sid" || name === "speakers" || name === "g") {
-            feeds[name] = new ort.Tensor("int64", new BigInt64Array([0n]), [1]);
-          } else if (name === "tone" || name === "tones") {
-            feeds[name] = new ort.Tensor("int64", new BigInt64Array(tones.map(v => BigInt(v))), [1, phoneLen]);
-          } else if (name === "language") {
-            feeds[name] = new ort.Tensor("int64", new BigInt64Array(new Array(phoneLen).fill(0n)), [1, phoneLen]);
-          } else if (name === "bert" || name === "ja_bert") {
-            feeds[name] = new ort.Tensor("float32", zeroBert, [1, HIDDEN_SIZE, phoneLen]);
-          } else if (name === "en_bert" || name === "zh_bert") {
-            feeds[name] = new ort.Tensor("float32", zeroBert, [1, HIDDEN_SIZE, phoneLen]);
-          } else if (name === "style_vec" || name === "style_vector") {
-            feeds[name] = new ort.Tensor("float32", new Float32Array(256), [1, 1, 256]);
-          } else if (name === "noise_scale") {
-            feeds[name] = new ort.Tensor("float32", new Float32Array([0.35]), [1]);
-          } else if (name === "noise_scale_w") {
-            feeds[name] = new ort.Tensor("float32", new Float32Array([0.6]), [1]);
-          } else if (name === "length_scale") {
-            feeds[name] = new ort.Tensor("float32", new Float32Array([1.0]), [1]);
-          } else if (name === "sdp_ratio") {
-            feeds[name] = new ort.Tensor("float32", new Float32Array([0.0]), [1]);
-          }
-        }
-
-        const results = await vitsSession.run(feeds);
-        const outputName = vitsSession.outputNames[0];
-        const audioData = results[outputName].data; // Float32Array
+        const result = await app.predict("/predict", [
+          text,  // text
+          0.35,  // noise_scale
+          0.6,   // noise_scale_w
+          0.0    // sdp_ratio
+        ]);
 
         const totalSec = ((performance.now() - tStart) / 1000).toFixed(2);
-        log(`✓ 音声合成完了: ${totalSec} 秒`);
+        log(`✓ 音声生成完了: ${totalSec} 秒`);
 
-        // WAV 生成 & キャッシュ
-        currentBlob = encodeWAV(audioData, SAMPLE_RATE);
-        audioCache.set(text, currentBlob);
+        const audioData = result.data[0];
+        currentAudioUrl = audioData.url;
 
-        audioPlayer.src = URL.createObjectURL(currentBlob);
+        // キャッシュ保存
+        audioCache.set(text, currentAudioUrl);
+
+        audioPlayer.src = currentAudioUrl;
         audioPlayer.play();
         downloadBtn.disabled = false;
         setStatus("再生中 🔊");
@@ -445,53 +240,19 @@
       }
     }
 
-    // WAV 保存
-    function downloadWav() {
-      if (!currentBlob) return;
-      const url = URL.createObjectURL(currentBlob);
+    function downloadAudio() {
+      if (!currentAudioUrl) return;
       const a = document.createElement("a");
-      a.href = url;
+      a.href = currentAudioUrl;
       a.download = `voice_${Date.now()}.wav`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      log("💾 WAVファイルを保存しました。");
+      log("💾 音声ファイルをダウンロードしました。");
     }
 
-    // 16-bit PCM WAV エンコーダ
-    function encodeWAV(samples, sampleRate) {
-      const buffer = new ArrayBuffer(44 + samples.length * 2);
-      const view = new DataView(buffer);
-
-      function writeString(view, offset, string) {
-        for (let i = 0; i < string.length; i++) {
-          view.setUint8(offset + i, string.charCodeAt(i));
-        }
-      }
-
-      writeString(view, 0, 'RIFF');
-      view.setUint32(4, 36 + samples.length * 2, true);
-      writeString(view, 8, 'WAVE');
-      writeString(view, 12, 'fmt ');
-      view.setUint32(16, 16, true);
-      view.setUint16(20, 1, true);
-      view.setUint16(22, 1, true);
-      view.setUint32(24, sampleRate, true);
-      view.setUint32(28, sampleRate * 2, true);
-      view.setUint16(32, 2, true);
-      view.setUint16(34, 16, true);
-      writeString(view, 36, 'data');
-      view.setUint32(40, samples.length * 2, true);
-
-      let offset = 44;
-      for (let i = 0; i < samples.length; i++, offset += 2) {
-        let s = Math.max(-1, Math.min(1, samples[i]));
-        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-      }
-
-      return new Blob([view], { type: 'audio/wav' });
-    }
+    playBtn.addEventListener("click", synthesize);
+    downloadBtn.addEventListener("click", downloadAudio);
   </script>
 </body>
 </html>
