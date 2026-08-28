@@ -123,7 +123,7 @@
   <div class="notice">
     <strong>【ご利用上の案内】</strong>
     <ul>
-      <li>クラウドAPI（Hugging Face Spaces）と連携し、漢字混じりの自由な文章を高音質で合成します。</li>
+      <li>Hugging Face Spaces（ZeroGPU）と連携し、漢字混じりの自由な文章を高速合成します。</li>
       <li>一度生成した音声はキャッシュされ、プレイヤーで再生・一時停止・シーク・WAV保存が自由に行えます。</li>
     </ul>
   </div>
@@ -141,7 +141,6 @@
     <label>🔊 音声コントロール:</label>
     <audio id="audioPlayer" controls></audio>
     <div>
-      <a id="downloadLink" style="display:none;"></a>
       <button id="downloadBtn" class="success" disabled>WAVを保存</button>
     </div>
   </div>
@@ -152,7 +151,6 @@
   <script type="module">
     import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
 
-    // ⚠️ あなたの Hugging Face Space の名前に書き換えてください
     const SPACE_ID = "muraseryosuke/murase-voice-vits2";
 
     let app = null;
@@ -191,7 +189,6 @@
         return;
       }
 
-      // キャッシュ確認
       if (audioCache.has(text)) {
         log(`⚡ キャッシュから即座に再生: 「${text}」`);
         currentAudioUrl = audioCache.get(text);
@@ -211,7 +208,8 @@
         setStatus("音声を生成中 (BERT + VITS 推論)...");
         const tStart = performance.now();
 
-        const result = await app.predict("/predict", [
+        // "/predict" ではなく有効なエンドポイント "/_infer" を指定
+        const result = await app.predict("/_infer", [
           text,  // text
           0.35,  // noise_scale
           0.6,   // noise_scale_w
@@ -221,10 +219,9 @@
         const totalSec = ((performance.now() - tStart) / 1000).toFixed(2);
         log(`✓ 音声生成完了: ${totalSec} 秒`);
 
-        const audioData = result.data[0];
-        currentAudioUrl = audioData.url;
+        const audioItem = result.data[0];
+        currentAudioUrl = typeof audioItem === "string" ? audioItem : (audioItem.url || audioItem.path);
 
-        // キャッシュ保存
         audioCache.set(text, currentAudioUrl);
 
         audioPlayer.src = currentAudioUrl;
