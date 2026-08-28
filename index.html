@@ -149,7 +149,7 @@
   <div id="log">ログがここに表示されます...</div>
 
   <script type="module">
-    import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
+    import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client@latest/+esm";
 
     const SPACE_ID = "muraseryosuke/murase-voice-vits2";
 
@@ -205,15 +205,15 @@
       try {
         await initClient();
 
-        setStatus("音声を生成中 (BERT + VITS 推論)...");
+        setStatus("音声を生成中 (ZeroGPU で推論中)...");
         const tStart = performance.now();
 
-        // "/predict" ではなく有効なエンドポイント "/_infer" を指定
-        const result = await app.predict("/_infer", [
-          text,  // text
-          0.35,  // noise_scale
-          0.6,   // noise_scale_w
-          0.0    // sdp_ratio
+        // 明示的なエンドポイント /synthesize を呼び出し
+        const result = await app.predict("/synthesize", [
+          text,
+          0.35,
+          0.6,
+          0.0
         ]);
 
         const totalSec = ((performance.now() - tStart) / 1000).toFixed(2);
