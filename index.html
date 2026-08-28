@@ -274,12 +274,7 @@
 
       try {
         const tStart = performance.now();
-        const resultData = await executeGradioCall("synthesize", [
-          text,
-          0.35,
-          0.6,
-          0.0
-        ]);
+        const resultData = await executeGradioCall("synthesize", [text]);
 
         const totalSec = ((performance.now() - tStart) / 1000).toFixed(2);
         log(`✓ 推論完了: ${totalSec} 秒`);
