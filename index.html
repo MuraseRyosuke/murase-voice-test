@@ -182,9 +182,12 @@
     let currentBlob = null;
     const audioCache = new Map();
 
-    // Style-BERT-VITS2 公式標準シンボルリスト (フォールバック用)
+    // Style-BERT-VITS2 公式標準シンボルマップ (全音素フォールバック)
     const DEFAULT_SYMBOLS = [
-      "_", ",", ".", "!", "?", "-", "A", "I", "U", "E", "O", "a", "b", "by", "ch", "cl", "d", "dy", "e", "f", "g", "gy", "h", "hy", "i", "j", "k", "ky", "m", "my", "n", "ny", "N", "o", "p", "py", "r", "ry", "s", "sh", "t", "ts", "u", "v", "w", "y", "z", "q", "ー", "SP", "UNK"
+      "_", ",", ".", "!", "?", "-", "A", "I", "U", "E", "O", "a", "b", "by", "ch", "cl",
+      "d", "dy", "e", "f", "g", "gy", "h", "hy", "i", "j", "k", "ky", "m", "my", "n", "ny",
+      "N", "o", "p", "py", "r", "ry", "s", "sh", "t", "ts", "u", "v", "w", "y", "z", "q",
+      "ー", "SP", "UNK"
     ];
 
     const audioPlayer = document.getElementById("audioPlayer");
@@ -230,7 +233,7 @@
         log("⚠️ vocab.txt の読み込みに失敗しました。");
       }
 
-      // symbols.json の自動パース
+      // symbols.json (全形式対応)
       symbolToId = new Map();
       try {
         const symRes = await fetch("./models/symbols.json");
@@ -241,7 +244,7 @@
             list = raw;
           } else if (raw.symbols && Array.isArray(raw.symbols)) {
             list = raw.symbols;
-          } else if (typeof raw === "object") {
+          } else if (typeof raw === "object" && raw !== null) {
             const entries = Object.entries(raw);
             if (entries.length > 0) {
               if (typeof entries[0][1] === "number") {
@@ -257,7 +260,6 @@
         }
       } catch (e) {}
 
-      // フォールバック
       if (symbolToId.size === 0) {
         DEFAULT_SYMBOLS.forEach((s, idx) => symbolToId.set(s, idx));
         log("ℹ️ 標準フォールバックシンボルを適用しました。");
@@ -266,8 +268,8 @@
       log(`✓ 辞書ロード完了 (語彙数: ${vocabMap ? vocabMap.size : 0}, 音素シンボル数: ${symbolToId.size})`);
     }
 
-    // 2. 分割バイナリを Blob URL としてロード
-    async function fetchModelAsBlobUrl(prefix, maxCount, label, startPct, endPct) {
+    // 2. 分割バイナリを Uint8Array としてロード
+    async function fetchDirectBinary(prefix, maxCount, label, startPct, endPct) {
       const chunks = [];
       for (let idx = 0; idx < maxCount; idx++) {
         const path = `${prefix}${idx}.bin`;
@@ -291,9 +293,7 @@
         merged.set(chunk, offset);
         offset += chunk.length;
       }
-
-      const blob = new Blob([merged], { type: "application/octet-stream" });
-      return URL.createObjectURL(blob);
+      return merged;
     }
 
     // 3. G2P テキスト解析
@@ -367,7 +367,7 @@
       return { phones, tones, word2ph, inputIds };
     }
 
-    // 4. 音声合成メイン関数（直列実行 ＆ メモリ最小化）
+    // 4. 音声合成メイン関数（メモリ逐次実行 & グラフ最適化無効化）
     async function synthesizeFromText() {
       const text = document.getElementById("inputText").value.trim();
       if (!text) {
@@ -400,19 +400,16 @@
         log(`音素数: ${phoneLen}, BERTトークン数: ${inputIds.length}`);
 
         // --- STEP 1: BERT 特徴量抽出 ---
-        const bertBlobUrl = await fetchModelAsBlobUrl("./models/bert_part", 6, "BERT モデル", 5, 45);
+        const bertBytes = await fetchDirectBinary("./models/bert_part", 6, "BERT モデル", 5, 45);
 
         setStatus("BERT 特徴量を推論中 (ONNX)...");
-        log("・BERT セッションを初期化中...");
+        log("・BERT セッションを初期化中 (メモリ節約モード)...");
 
-        const sessionOptions = {
+        // グラフ最適化を無効化して WASM メモリの爆発を防ぐ
+        const bertSession = await ort.InferenceSession.create(bertBytes, {
           executionProviders: ['wasm'],
-          graphOptimizationLevel: 'basic',
-          enableCpuMemArena: false
-        };
-
-        const bertSession = await ort.InferenceSession.create(bertBlobUrl, sessionOptions);
-        URL.revokeObjectURL(bertBlobUrl); // ロード後に URL 解放
+          graphOptimizationLevel: 'disabled'
+        });
 
         const seqLen = inputIds.length;
         const bertFeeds = {
@@ -440,16 +437,18 @@
           }
         }
 
-        // BERT セッションの完全解放
+        // BERT セッションおよび元バイナリのメモリ完全破棄
         await bertSession.release();
         log("✓ BERT 推論完了（メモリ解放済み）");
 
         // --- STEP 2: VITS 音声波形生成 ---
-        const vitsBlobUrl = await fetchModelAsBlobUrl("./models/model_part", 10, "VITS モデル", 50, 95);
+        const vitsBytes = await fetchDirectBinary("./models/model_part", 10, "VITS モデル", 50, 95);
         
         setStatus("VITS 音声モデルを初期化中...");
-        const vitsSession = await ort.InferenceSession.create(vitsBlobUrl, sessionOptions);
-        URL.revokeObjectURL(vitsBlobUrl);
+        const vitsSession = await ort.InferenceSession.create(vitsBytes, {
+          executionProviders: ['wasm'],
+          graphOptimizationLevel: 'disabled'
+        });
         log("✅ VITS セッションの初期化完了");
 
         setStatus("VITS で音声波形を生成中...");
